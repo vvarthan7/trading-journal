@@ -111,10 +111,8 @@ utility then lands on the design's real numbers, so don't round them to Tailwind
 You can also run it by hand.
 
 - `vite.config.ts` sets `base: "/trading-journal/"`, and the router uses the same basename.
-- The build reads `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` from the repo's
-  Actions **variables**.
-- GitHub Pages has no SPA fallback, so the workflow copies `index.html` to `404.html`. That
-  keeps deep links and refreshes working.
+- The build reads `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` and
+  `VITE_SIGN_IN_PATH` from the repo's Actions **variables**.
 
 ## Deviation from the design
 
