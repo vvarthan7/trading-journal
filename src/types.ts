@@ -60,6 +60,8 @@ export type YesNo = "yes" | "no";
  */
 export interface JournalEntry {
   id: number;
+  /** Level play level, 1–6, chosen by hand — a level can be left before its ten boxes fill */
+  level: number;
   /** local date-time of the trade, yyyy-mm-ddThh:mm */
   dateTime: string;
   instrument: string;

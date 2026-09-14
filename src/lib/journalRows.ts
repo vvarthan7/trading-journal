@@ -4,6 +4,7 @@ import type { JournalEntry, YesNo } from "../types";
 export interface JournalRow {
   id: number;
   user_id: string;
+  level: number;
   /** Postgres `timestamp`, e.g. 2026-09-14T10:30:00 — local wall-clock time, no zone */
   date_time: string;
   instrument: string;
@@ -24,6 +25,7 @@ export interface JournalRow {
 }
 
 const COLUMNS: Record<Exclude<keyof JournalEntry, "id">, keyof JournalRow> = {
+  level: "level",
   dateTime: "date_time",
   instrument: "instrument",
   tradeType: "trade_type",
@@ -44,6 +46,7 @@ const COLUMNS: Record<Exclude<keyof JournalEntry, "id">, keyof JournalRow> = {
 export function fromRow(r: JournalRow): JournalEntry {
   return {
     id: r.id,
+    level: r.level,
     dateTime: r.date_time.slice(0, 16),
     instrument: r.instrument,
     tradeType: r.trade_type,

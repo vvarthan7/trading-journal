@@ -1,6 +1,13 @@
 import { useJournal } from "../store";
 import type { JournalEntry, YesNo } from "../types";
-import { levelOf } from "../lib/format";
+import {
+  LEVELS,
+  WINS_TO_ADVANCE,
+  canUseLevel,
+  levelWins,
+  missingFields,
+  nextLevel,
+} from "../lib/format";
 import { LOSS, WIN } from "./ui";
 
 const TRADE_TYPES = ["Options Selling", "Options Buying", "Index Futures", "Equity"];
@@ -56,7 +63,7 @@ const YES_NO = [
  */
 const COLS: { head: string; min: number; fixed?: boolean }[] = [
   { head: "#", min: 30, fixed: true },
-  { head: "Level", min: 44, fixed: true },
+  { head: "Level", min: 52, fixed: true },
   { head: "Date &\ntime", min: 176 },
   { head: "Instrument", min: 108 },
   { head: "Trade\ntype", min: 132 },
@@ -77,8 +84,16 @@ const MIN_WIDTH = COLS.reduce((sum, c) => sum + c.min, 0) + GAP * (COLS.length -
 
 const GRID = { gridTemplateColumns: TEMPLATE, columnGap: GAP };
 
-const FIELD =
-  "w-full h-[30px] px-2 rounded-sm border border-line-strong bg-bg text-[12.5px] text-ink hover:border-accent-line focus-visible:border-accent disabled:cursor-default disabled:hover:border-line-strong transition-colors";
+const FIELD_BASE =
+  "w-full h-[30px] px-2 rounded-sm border bg-bg text-[12.5px] text-ink hover:border-accent-line focus-visible:border-accent disabled:cursor-default transition-colors";
+
+/** Field classes. An empty required field keeps a warn border until it's filled. */
+const field = (missing = false) =>
+  `${FIELD_BASE} ${
+    missing
+      ? "border-warn disabled:hover:border-warn"
+      : "border-line-strong disabled:hover:border-line-strong"
+  }`;
 
 function Choice<T extends string>({
   value,
@@ -86,19 +101,23 @@ function Choice<T extends string>({
   onChange,
   tone,
   label,
+  missing,
 }: {
   value: T | null;
   options: { value: T; label: string }[];
   onChange: (v: T | null) => void;
   tone?: (v: T) => string | undefined;
   label: string;
+  missing?: boolean;
 }) {
   return (
     <select
       aria-label={label}
+      aria-invalid={missing || undefined}
+      required
       value={value ?? ""}
       onChange={(e) => onChange(e.target.value === "" ? null : (e.target.value as T))}
-      className={`${FIELD} cursor-pointer`}
+      className={`${field(missing)} cursor-pointer`}
       style={{ color: value && tone ? tone(value) : value ? undefined : "var(--color-dim)" }}
     >
       <option value="">—</option>
@@ -112,6 +131,8 @@ function Choice<T extends string>({
 }
 
 const asOptions = (xs: string[]) => xs.map((x) => ({ value: x, label: x }));
+
+const LEVEL_OPTIONS = Array.from({ length: LEVELS }, (_, i) => i + 1);
 
 /** Quick per-trade journal: one editable row per trade, behaviour flags as yes/no. */
 export default function TradeJournal() {
@@ -127,6 +148,20 @@ export default function TradeJournal() {
   const canEdit = session !== null;
 
   const set = (id: number, patch: Partial<JournalEntry>) => updateJournalEntry(id, patch);
+
+  /** Per-row empty required fields; only flagged for the owner, who can fill them. */
+  const missing = journal.map((e) => (canEdit ? missingFields(e) : new Set<keyof JournalEntry>()));
+  /** 1-based numbers of rows that still have an empty field. */
+  const incomplete = missing.flatMap((m, i) => (m.size > 0 ? [i + 1] : []));
+
+  /** Why no new row can go on any level, or null when one can. */
+  const last = journal[journal.length - 1];
+  const levelBlock =
+    !last || nextLevel(journal) !== null
+      ? null
+      : last.level === LEVELS
+        ? `Level ${LEVELS} is full.`
+        : `Level ${last.level} is full with ${levelWins(journal, last.level)} wins — ${WINS_TO_ADVANCE} are needed to move to level ${last.level + 1}.`;
 
   return (
     <div className="border border-line rounded-md overflow-hidden bg-surface">
@@ -171,23 +206,43 @@ export default function TradeJournal() {
               style={GRID}
             >
               <span className="text-[12.5px] text-dim">{i + 1}</span>
-              <span className="text-[12.5px] text-ink-2">{levelOf(i)}</span>
+              {/* Picked by hand. A full level, or one whose level below lacks the wins, is greyed out. */}
+              <select
+                aria-label="Level"
+                value={e.level}
+                onChange={(ev) => set(e.id, { level: Number(ev.target.value) })}
+                className={`${field()} cursor-pointer`}
+              >
+                {LEVEL_OPTIONS.map((l) => (
+                  <option
+                    key={l}
+                    value={l}
+                    disabled={l !== e.level && !canUseLevel(journal, l, e.id)}
+                  >
+                    {l}
+                  </option>
+                ))}
+              </select>
 
               <input
                 type="datetime-local"
                 aria-label="Date and time"
+                aria-invalid={missing[i].has("dateTime") || undefined}
+                required
                 value={e.dateTime}
                 onChange={(ev) => set(e.id, { dateTime: ev.target.value })}
-                className={FIELD}
+                className={field(missing[i].has("dateTime"))}
               />
 
               <input
                 type="text"
                 aria-label="Instrument"
+                aria-invalid={missing[i].has("instrument") || undefined}
+                required
                 placeholder="NIFTY"
                 value={e.instrument}
                 onChange={(ev) => set(e.id, { instrument: ev.target.value.toUpperCase() })}
-                className={`${FIELD} placeholder:text-dim/60`}
+                className={`${field(missing[i].has("instrument"))} placeholder:text-dim/60`}
               />
 
               <Choice
@@ -195,6 +250,7 @@ export default function TradeJournal() {
                 value={e.tradeType}
                 options={asOptions(TRADE_TYPES)}
                 onChange={(v) => set(e.id, { tradeType: v })}
+                missing={missing[i].has("tradeType")}
               />
 
               <Choice
@@ -205,6 +261,7 @@ export default function TradeJournal() {
                   { value: "normal", label: "Normal" },
                 ]}
                 onChange={(v) => set(e.id, { product: v })}
+                missing={missing[i].has("product")}
               />
 
               <Choice
@@ -212,6 +269,7 @@ export default function TradeJournal() {
                 value={e.strategy}
                 options={asOptions(STRATEGIES)}
                 onChange={(v) => set(e.id, { strategy: v })}
+                missing={missing[i].has("strategy")}
               />
 
               <Choice
@@ -223,6 +281,7 @@ export default function TradeJournal() {
                 ]}
                 onChange={(v) => set(e.id, { outcome: v })}
                 tone={(v) => (v === "profit" ? WIN : LOSS)}
+                missing={missing[i].has("outcome")}
               />
 
               <Choice
@@ -233,6 +292,7 @@ export default function TradeJournal() {
                   { value: "luck", label: "Luck" },
                 ]}
                 onChange={(v) => set(e.id, { skillLuck: v })}
+                missing={missing[i].has("skillLuck")}
               />
 
               {FLAGS.map((f) => (
@@ -243,6 +303,7 @@ export default function TradeJournal() {
                   options={YES_NO}
                   onChange={(v) => set(e.id, { [f.key]: v })}
                   tone={(v) => (v === f.good ? WIN : LOSS)}
+                  missing={missing[i].has(f.key)}
                 />
               ))}
 
@@ -274,14 +335,27 @@ export default function TradeJournal() {
       </div>
 
       {canEdit && (
-        <button
-          type="button"
-          onClick={() => void addJournalEntry()}
-          className="flex items-center gap-2 w-full px-6 py-3 border-0 bg-transparent cursor-pointer text-[12.5px] text-accent-deep hover:bg-subtle transition-colors"
-        >
-          <i className="ph ph-plus text-[13px]" />
-          Add row
-        </button>
+        <div className="flex items-center">
+          <button
+            type="button"
+            disabled={incomplete.length > 0 || levelBlock !== null}
+            onClick={() => void addJournalEntry()}
+            className="flex items-center gap-2 px-6 py-3 border-0 bg-transparent cursor-pointer text-[12.5px] text-accent-deep hover:bg-subtle disabled:cursor-not-allowed disabled:text-dim disabled:hover:bg-transparent transition-colors"
+          >
+            <i className="ph ph-plus text-[13px]" />
+            Add row
+          </button>
+          {incomplete.length > 0 ? (
+            <span className="ml-auto px-6 text-[11.5px] text-warn">
+              Fill in every field in {incomplete.length === 1 ? "row" : "rows"}{" "}
+              {incomplete.join(", ")} to add another row.
+            </span>
+          ) : (
+            levelBlock && (
+              <span className="ml-auto px-6 text-[11.5px] text-warn">{levelBlock}</span>
+            )
+          )}
+        </div>
       )}
     </div>
   );

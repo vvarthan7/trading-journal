@@ -1,4 +1,4 @@
-import type { Trade } from "../types";
+import type { JournalEntry, Trade } from "../types";
 
 export const CUR = "₹";
 
@@ -53,12 +53,73 @@ export function longDay(iso: string): string {
   });
 }
 
-/** Journal trades fill Level play in blocks: trades 1–10 are level 1, 11–20 level 2, … */
+/**
+ * Level play: six levels of ten boxes. Each journal entry is put on a level by hand, so a level
+ * can be left early (say after 6 or 8 wins) and its unused boxes are skipped — but only once it
+ * has `WINS_TO_ADVANCE` wins. Without them the next level stays locked.
+ */
+export const LEVELS = 6;
 export const TRADES_PER_LEVEL = 10;
+export const WINS_TO_ADVANCE = 6;
 
-/** 1-based level for a journal row at 0-based position `index`. */
-export function levelOf(index: number): number {
-  return Math.floor(index / TRADES_PER_LEVEL) + 1;
+/** Entries on `level`, not counting the entry `exceptId`. */
+export function levelCount(entries: JournalEntry[], level: number, exceptId?: number): number {
+  return entries.filter((e) => e.level === level && e.id !== exceptId).length;
+}
+
+/** Wins on `level`, not counting the entry `exceptId`. */
+export function levelWins(entries: JournalEntry[], level: number, exceptId?: number): number {
+  return entries.filter((e) => e.level === level && e.outcome === "profit" && e.id !== exceptId)
+    .length;
+}
+
+/**
+ * Whether an entry (`exceptId`, or a new one) may go on `level`: the level has a free box and
+ * the level below has enough wins without counting that entry.
+ */
+export function canUseLevel(entries: JournalEntry[], level: number, exceptId?: number): boolean {
+  if (levelCount(entries, level, exceptId) >= TRADES_PER_LEVEL) return false;
+  return level === 1 || levelWins(entries, level - 1, exceptId) >= WINS_TO_ADVANCE;
+}
+
+/**
+ * Level for a new entry: the last entry's level while it has a free box, then the next level if
+ * it's unlocked. Null when the last level is full and there's nowhere to go.
+ */
+export function nextLevel(entries: JournalEntry[]): number | null {
+  const last = entries[entries.length - 1];
+  if (!last) return 1;
+  if (levelCount(entries, last.level) < TRADES_PER_LEVEL) return last.level;
+  return last.level < LEVELS && canUseLevel(entries, last.level + 1) ? last.level + 1 : null;
+}
+
+/** Every journal field is required; `level` always has a value so it isn't listed. */
+const REQUIRED = [
+  "dateTime",
+  "instrument",
+  "tradeType",
+  "product",
+  "strategy",
+  "outcome",
+  "skillLuck",
+  "rulesFollowed",
+  "positionSizing",
+  "fomo",
+  "revenge",
+  "earlyEntry",
+  "earlyExit",
+  "overtrading",
+  "wrongTrade",
+] as const satisfies readonly (keyof JournalEntry)[];
+
+/** Required fields still empty on `e`. No new row can be added while any entry has one. */
+export function missingFields(e: JournalEntry): Set<keyof JournalEntry> {
+  return new Set(
+    REQUIRED.filter((k) => {
+      const v = e[k];
+      return v === null || v.trim() === "";
+    })
+  );
 }
 
 /** Current local time in the yyyy-mm-ddThh:mm shape a datetime-local input expects. */

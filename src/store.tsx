@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import type { JournalEntry, PlanAdherence, QueuedFill, Trade } from "./types";
-import { nowLocalInput } from "./lib/format";
+import { missingFields, nextLevel, nowLocalInput } from "./lib/format";
 import { supabase } from "./lib/supabase";
 import { fromRow, toRow } from "./lib/journalRows";
 import type { JournalRow } from "./lib/journalRows";
@@ -141,9 +141,14 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   }, [flushAll]);
 
   const addJournalEntry = useCallback(async () => {
+    // Every existing row must be complete before another can be started.
+    if (journal.some((e) => missingFields(e).size > 0)) return;
+    // …and there must be a level with room for it that has been unlocked.
+    const level = nextLevel(journal);
+    if (level === null) return;
     const { data, error } = await supabase
       .from("journal_entries")
-      .insert({ date_time: nowLocalInput() })
+      .insert({ date_time: nowLocalInput(), level })
       .select()
       .single();
     if (error) {
@@ -152,7 +157,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     }
     setSyncError(null);
     setJournal((prev) => [...prev, fromRow(data as JournalRow)]);
-  }, []);
+  }, [journal]);
 
   const updateJournalEntry = useCallback(
     (id: number, patch: Partial<JournalEntry>) => {

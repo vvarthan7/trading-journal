@@ -1,11 +1,14 @@
 import { useJournal } from "../store";
-import { TRADES_PER_LEVEL } from "../lib/format";
+import { LEVELS, TRADES_PER_LEVEL, WINS_TO_ADVANCE, levelWins } from "../lib/format";
 
-const LEVELS = 6;
-
-/** Six levels of ten boxes each, filled in journal order: trade n lands in box n. */
+/**
+ * Six levels of ten boxes each. Every journal entry lands in the next box of the level picked
+ * for it. Once any entry sits on a higher level, a lower level's unused boxes read "—". A level
+ * stays locked until the one below has `WINS_TO_ADVANCE` wins.
+ */
 export default function LevelPlay() {
   const { journal } = useJournal();
+  const highest = Math.max(0, ...journal.map((e) => e.level));
 
   return (
     <div className="border border-line rounded-md overflow-hidden bg-surface">
@@ -18,33 +21,79 @@ export default function LevelPlay() {
       </div>
 
       <div className="px-6 py-6 flex flex-col gap-4">
-        {Array.from({ length: LEVELS }, (_, i) => i + 1).map((level) => (
-          <div key={level} className="grid grid-cols-[72px_1fr] items-center gap-5">
-            <span className="text-[13px] text-muted">Level {level}</span>
-            <div className="grid grid-cols-10 gap-3">
-              {Array.from({ length: TRADES_PER_LEVEL }, (_, b) => {
-                const n = (level - 1) * TRADES_PER_LEVEL + b;
-                const outcome = journal[n]?.outcome;
-                return (
-                  <div
-                    key={b}
-                    title={journal[n] ? `Trade ${n + 1}` : undefined}
-                    className={[
-                      "h-16 rounded-md border grid place-items-center text-[14px] font-medium",
-                      outcome === "profit"
-                        ? "bg-win border-win text-white"
-                        : outcome === "loss"
-                          ? "bg-loss border-loss text-white"
-                          : "bg-bg border-line-strong",
-                    ].join(" ")}
-                  >
-                    {outcome === "profit" ? "W" : outcome === "loss" ? "L" : null}
-                  </div>
-                );
-              })}
-            </div>
+        <div className="grid grid-cols-[72px_1fr_40px] items-center gap-5">
+          <span />
+          <div className="grid grid-cols-10 gap-3">
+            {Array.from({ length: TRADES_PER_LEVEL }, (_, b) => (
+              <span key={b} className="text-center text-[11.5px] text-dim">
+                {b + 1}
+              </span>
+            ))}
           </div>
-        ))}
+          <span />
+        </div>
+        {Array.from({ length: LEVELS }, (_, i) => i + 1).map((level) => {
+          const entries = journal.filter((e) => e.level === level);
+          const skipped = level < highest;
+          const wins = entries.filter((e) => e.outcome === "profit").length;
+          const locked =
+            level > 1 &&
+            entries.length === 0 &&
+            levelWins(journal, level - 1) < WINS_TO_ADVANCE;
+          return (
+            <div key={level} className="grid grid-cols-[72px_1fr_40px] items-center gap-5">
+              <span className="flex items-center gap-1 text-[13px] text-muted">
+                Level {level}
+                {locked && (
+                  <i
+                    className="ph ph-lock-simple text-[12px] text-dim"
+                    title={`Locked — needs ${WINS_TO_ADVANCE} wins on level ${level - 1}`}
+                  />
+                )}
+              </span>
+              <div className="grid grid-cols-10 gap-3">
+                {Array.from({ length: TRADES_PER_LEVEL }, (_, b) => {
+                  const entry = entries[b];
+                  const outcome = entry?.outcome;
+                  return (
+                    <div
+                      key={b}
+                      title={
+                        entry
+                          ? `Trade ${journal.indexOf(entry) + 1}`
+                          : skipped
+                            ? "Skipped"
+                            : undefined
+                      }
+                      className={[
+                        "h-16 rounded-md border grid place-items-center text-[14px] font-medium",
+                        outcome === "profit"
+                          ? "bg-win border-win text-white"
+                          : outcome === "loss"
+                            ? "bg-loss border-loss text-white"
+                            : "bg-bg border-line-strong text-dim",
+                      ].join(" ")}
+                    >
+                      {outcome === "profit"
+                        ? "W"
+                        : outcome === "loss"
+                          ? "L"
+                          : !entry && skipped
+                            ? "—"
+                            : null}
+                    </div>
+                  );
+                })}
+              </div>
+              <span
+                title={`${wins}/${TRADES_PER_LEVEL} wins`}
+                className={`text-[13px] font-medium ${wins > 0 ? "text-win" : "text-dim"}`}
+              >
+                {wins} W
+              </span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
