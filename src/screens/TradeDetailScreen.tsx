@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useJournal } from "../store";
-import { BUCKET_NOTE } from "../data/mock";
 import type { PlanAdherence } from "../types";
 import { money, pnlTone, price, rLabel, seriesPath, shortDay } from "../lib/format";
 import {
@@ -9,7 +8,6 @@ import {
   Eyebrow,
   FocusRating,
   PillGroup,
-  Tag,
   WIN,
   LOSS,
 } from "../components/ui";

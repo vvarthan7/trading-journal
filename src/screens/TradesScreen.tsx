@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useJournal } from "../store";
-import { money, planLabel, pnlTone, price, rLabel, shortDay } from "../lib/format";
+import { money, planLabel, price, rLabel, shortDay } from "../lib/format";
 import { PillGroup, WIN, WARN, LOSS } from "../components/ui";
 
 type Filter = "all" | "winners" | "losers" | "offplan" | "news" | "scalps";

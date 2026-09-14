@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useJournal } from "../store";
-import { CUR, money, planLabel, pnlTone, price, rLabel } from "../lib/format";
+import { money, planLabel, pnlTone, price, rLabel } from "../lib/format";
 import {
   Divider,
   Eyebrow,

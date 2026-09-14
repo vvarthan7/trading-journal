@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useJournal } from "../store";
 import { DEPOSIT_MARKS, EQUITY_LABELS, DISCIPLINE_STATS, STRATEGY_STATS, STYLE_STATS, TAG_STATS } from "../data/mock";
-import { CUR, computeKpis, money, pnlTone, seriesPath } from "../lib/format";
-import { Eyebrow, Meter, PillGroup, WARN, WIN, LOSS } from "../components/ui";
+import { CUR, computeKpis, money, seriesPath } from "../lib/format";
+import { Eyebrow, PillGroup, WARN, WIN, LOSS } from "../components/ui";
 
 type Range = "1M" | "3M" | "6M" | "All";
 

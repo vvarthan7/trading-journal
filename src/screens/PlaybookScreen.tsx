@@ -1,5 +1,5 @@
 import { useJournal } from "../store";
-import { CUR, money } from "../lib/format";
+import { money } from "../lib/format";
 import { Eyebrow, WIN, WARN, LOSS } from "../components/ui";
 
 export default function PlaybookScreen() {
