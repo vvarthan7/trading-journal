@@ -1,5 +1,4 @@
 import { NavLink } from "react-router-dom";
-import { CUR, money } from "../lib/format";
 
 interface SidebarProps {
   capital: number;
@@ -9,22 +8,50 @@ interface SidebarProps {
 }
 
 const NAV = [
-  { to: "/session", label: "Session", icon: "ph ph-crosshair", hasBadge: true },
-  { to: "/trades", label: "Trades", icon: "ph ph-list-dashes", hasBadge: false },
-  { to: "/playbook", label: "Playbook", icon: "ph ph-book-open-text", hasBadge: false },
-  { to: "/review", label: "Review", icon: "ph ph-chart-line-up", hasBadge: false },
-  { to: "/capture", label: "Capture", icon: "ph ph-plugs-connected", hasBadge: false },
+  {
+    to: "/dashboard",
+    label: "Dashboard",
+    icon: "ph ph-squares-four",
+    hasBadge: false,
+  },
+  // { to: "/session", label: "Session", icon: "ph ph-crosshair", hasBadge: true },
+  // {
+  //   to: "/trades",
+  //   label: "Trades",
+  //   icon: "ph ph-list-dashes",
+  //   hasBadge: false,
+  // },
+  // {
+  //   to: "/playbook",
+  //   label: "Playbook",
+  //   icon: "ph ph-book-open-text",
+  //   hasBadge: false,
+  // },
+  // {
+  //   to: "/review",
+  //   label: "Review",
+  //   icon: "ph ph-chart-line-up",
+  //   hasBadge: false,
+  // },
+  // {
+  //   to: "/capture",
+  //   label: "Capture",
+  //   icon: "ph ph-plugs-connected",
+  //   hasBadge: false,
+  // },
 ];
 
-export default function Sidebar({ capital, returnPct, captureMode, queueCount }: SidebarProps) {
+export default function Sidebar({ queueCount }: SidebarProps) {
   return (
-    <aside className="w-[212px] border-r border-line px-4 py-8 flex flex-col gap-8 sticky top-0 h-screen">
+    <aside className="w-[168px] border-r border-line px-4 py-8 flex flex-col gap-8 sticky top-0 h-screen">
       {/* Logo */}
       <div className="flex items-center gap-3 px-3">
         <span className="w-[22px] h-[22px] rounded-sm border border-accent flex items-center justify-center text-accent text-[13px]">
           <i className="ph ph-notebook" />
         </span>
-        <span className="text-[14px] font-medium tracking-[-0.015em]">Ledgerbook</span>
+        <span className="text-[14px] font-medium tracking-[-0.015em]">
+          The Journal
+        </span>
       </div>
 
       {/* Navigation */}
@@ -53,9 +80,8 @@ export default function Sidebar({ capital, returnPct, captureMode, queueCount }:
         ))}
       </nav>
 
-      {/* Bottom section */}
-      <div className="mt-auto flex flex-col gap-6">
-        {/* Broker link status */}
+      {/* Bottom section (broker link + capital) — hidden for now */}
+      {/* <div className="mt-auto flex flex-col gap-6">
         <div className="border border-line rounded-md p-4">
           <div className="text-[11px] tracking-[0.08em] uppercase text-dim mb-3">
             Broker link
@@ -66,23 +92,32 @@ export default function Sidebar({ capital, returnPct, captureMode, queueCount }:
               style={{ animation: "pulse 2.4s ease-in-out infinite" }}
             />
             <span className="text-[12.5px] text-ink-2">
-              {captureMode === "review" ? "Capturing · review first" : "Capturing · auto-saving"}
+              {captureMode === "review"
+                ? "Capturing · review first"
+                : "Capturing · auto-saving"}
             </span>
           </div>
-          <div className="text-[11.5px] text-dim mt-2">3 tabs watched · 11:29</div>
+          <div className="text-[11.5px] text-dim mt-2">
+            3 tabs watched · 11:29
+          </div>
         </div>
 
-        {/* Capital */}
         <div className="px-2 flex flex-col gap-1">
-          <div className="text-[11px] tracking-[0.08em] uppercase text-dim">Capital</div>
-          <div className="text-[20px] font-medium tracking-[-0.015em]">
-            {CUR}{capital.toLocaleString("en-IN")}
+          <div className="text-[11px] tracking-[0.08em] uppercase text-dim">
+            Capital
           </div>
-          <div className={`text-[12px] ${returnPct >= 0 ? "text-win" : "text-loss"}`}>
-            {returnPct >= 0 ? "+" : "−"}{Math.abs(returnPct).toFixed(1)}% since 12 Jun
+          <div className="text-[20px] font-medium tracking-[-0.015em]">
+            {CUR}
+            {capital.toLocaleString("en-IN")}
+          </div>
+          <div
+            className={`text-[12px] ${returnPct >= 0 ? "text-win" : "text-loss"}`}
+          >
+            {returnPct >= 0 ? "+" : "−"}
+            {Math.abs(returnPct).toFixed(1)}% since 12 Jun
           </div>
         </div>
-      </div>
+      </div> */}
     </aside>
   );
 }

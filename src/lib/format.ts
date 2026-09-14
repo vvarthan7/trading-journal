@@ -53,6 +53,21 @@ export function longDay(iso: string): string {
   });
 }
 
+/** Journal trades fill Level play in blocks: trades 1–10 are level 1, 11–20 level 2, … */
+export const TRADES_PER_LEVEL = 10;
+
+/** 1-based level for a journal row at 0-based position `index`. */
+export function levelOf(index: number): number {
+  return Math.floor(index / TRADES_PER_LEVEL) + 1;
+}
+
+/** Current local time in the yyyy-mm-ddThh:mm shape a datetime-local input expects. */
+export function nowLocalInput(): string {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 16);
+}
+
 /** Build an SVG path string from a numeric series scaled into a box. */
 export function seriesPath(
   values: number[],

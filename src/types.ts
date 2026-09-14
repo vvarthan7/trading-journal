@@ -52,6 +52,33 @@ export interface Trade {
   screenshotUrl?: string | null;
 }
 
+export type YesNo = "yes" | "no";
+
+/**
+ * One row of the dashboard's quick trade journal. Every choice field is null until picked,
+ * so a fresh row records nothing rather than a default answer.
+ */
+export interface JournalEntry {
+  id: number;
+  /** local date-time of the trade, yyyy-mm-ddThh:mm */
+  dateTime: string;
+  instrument: string;
+  /** Options Selling | Options Buying | Index Futures | Equity */
+  tradeType: string | null;
+  product: "mis" | "normal" | null;
+  strategy: string | null;
+  outcome: "profit" | "loss" | null;
+  skillLuck: "skill" | "luck" | null;
+  rulesFollowed: YesNo | null;
+  positionSizing: YesNo | null;
+  fomo: YesNo | null;
+  revenge: YesNo | null;
+  earlyEntry: YesNo | null;
+  earlyExit: YesNo | null;
+  overtrading: YesNo | null;
+  wrongTrade: YesNo | null;
+}
+
 export interface CapitalEvent {
   id: number;
   date: string;

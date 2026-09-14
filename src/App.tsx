@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import Sidebar from "./components/Sidebar";
+import DashboardScreen from "./screens/DashboardScreen";
 import SessionScreen from "./screens/SessionScreen";
 import TradesScreen from "./screens/TradesScreen";
 import TradeDetailScreen from "./screens/TradeDetailScreen";
@@ -15,7 +16,7 @@ export default function App() {
   const returnPct = ((capital - start) / start) * 100;
 
   return (
-    <div className="grid grid-cols-[212px_1fr] min-h-screen bg-bg text-ink">
+    <div className="grid grid-cols-[168px_1fr] min-h-screen bg-bg text-ink">
       <Sidebar
         capital={capital}
         returnPct={returnPct}
@@ -24,14 +25,15 @@ export default function App() {
       />
       <main className="min-w-[1180px]">
         <Routes>
-          <Route path="/" element={<Navigate to="/session" replace />} />
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/dashboard" element={<DashboardScreen />} />
           <Route path="/session" element={<SessionScreen />} />
           <Route path="/trades" element={<TradesScreen />} />
           <Route path="/trades/:id" element={<TradeDetailScreen />} />
           <Route path="/review" element={<ReviewScreen />} />
           <Route path="/playbook" element={<PlaybookScreen />} />
           <Route path="/capture" element={<CaptureScreen />} />
-          <Route path="*" element={<Navigate to="/session" replace />} />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </main>
     </div>

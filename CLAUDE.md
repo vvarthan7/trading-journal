@@ -34,8 +34,8 @@ Prefer routing new ones through the store rather than adding to the direct-impor
 **`src/types.ts` is written to be the DB schema**, not just view models — `Trade` is the round
 trip, not the raw fill. Change it with that in mind; phase 2 builds tables from it.
 
-**Routing** is flat in `App.tsx`: `/session`, `/trades`, `/trades/:id`, `/review`, `/playbook`,
-`/capture`, with `/` and `*` redirecting to `/session`. Layout is a fixed 212px sidebar grid
+**Routing** is flat in `App.tsx`: `/dashboard`, `/session`, `/trades`, `/trades/:id`, `/review`, `/playbook`,
+`/capture`, with `/` and `*` redirecting to `/dashboard` (the landing page). Layout is a fixed 212px sidebar grid
 plus a `min-w-[1180px]` main column — this is a desktop-only design, not responsive.
 
 **Derived numbers live in `src/lib/format.ts`**, not in components: `computeKpis`, `money`,
