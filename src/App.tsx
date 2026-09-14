@@ -7,9 +7,23 @@ import TradeDetailScreen from "./screens/TradeDetailScreen";
 import ReviewScreen from "./screens/ReviewScreen";
 import PlaybookScreen from "./screens/PlaybookScreen";
 import CaptureScreen from "./screens/CaptureScreen";
+import SignInScreen from "./screens/SignInScreen";
 import { useJournal } from "./store";
 
+/** Unlinked sign-in URL. Set VITE_SIGN_IN_PATH in .env.local to keep it private. */
+const SIGN_IN_PATH = import.meta.env.VITE_SIGN_IN_PATH || "/signin";
+
 export default function App() {
+  return (
+    <Routes>
+      <Route path={SIGN_IN_PATH} element={<SignInScreen />} />
+      <Route path="*" element={<Shell />} />
+    </Routes>
+  );
+}
+
+/** Sidebar layout wrapping every screen except sign-in. */
+function Shell() {
   const { equity, captureMode, queue } = useJournal();
   const capital = equity[equity.length - 1];
   const start = equity[0];

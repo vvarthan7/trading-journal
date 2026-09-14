@@ -1,7 +1,11 @@
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import type { Session } from "@supabase/supabase-js";
 import type { JournalEntry, PlanAdherence, QueuedFill, Trade } from "./types";
 import { nowLocalInput } from "./lib/format";
+import { supabase } from "./lib/supabase";
+import { fromRow, toRow } from "./lib/journalRows";
+import type { JournalRow } from "./lib/journalRows";
 import {
   CAPITAL_EVENTS,
   CAPTURE_RULES,
@@ -19,35 +23,28 @@ import {
 
 type CaptureMode = "review" | "auto";
 
-function blankJournalEntry(id: number): JournalEntry {
-  return {
-    id,
-    dateTime: nowLocalInput(),
-    instrument: "",
-    tradeType: null,
-    product: null,
-    strategy: null,
-    outcome: null,
-    skillLuck: null,
-    rulesFollowed: null,
-    positionSizing: null,
-    fomo: null,
-    revenge: null,
-    earlyEntry: null,
-    earlyExit: null,
-    overtrading: null,
-    wrongTrade: null,
-  };
-}
+/** Edits to a row are batched and written this long after the last keystroke or pick. */
+const SAVE_DELAY_MS = 500;
+
+/** RLS rejects a write by matching zero rows rather than erroring. */
+const NOT_SAVED = "Not saved — are you still signed in?";
 
 interface JournalState {
+  session: Session | null;
+  /** Resolves to an error message, or null on success. */
+  signIn: (email: string, password: string) => Promise<string | null>;
+  signOut: () => Promise<void>;
+
   trades: Trade[];
   updateTrade: (id: number, patch: Partial<Trade>) => void;
 
   journal: JournalEntry[];
-  addJournalEntry: () => void;
+  journalLoading: boolean;
+  /** Last failed Supabase read or write, cleared by the next successful write. */
+  syncError: string | null;
+  addJournalEntry: () => Promise<void>;
   updateJournalEntry: (id: number, patch: Partial<JournalEntry>) => void;
-  removeJournalEntry: (id: number) => void;
+  removeJournalEntry: (id: number) => Promise<void>;
 
   queue: QueuedFill[];
   acceptFill: (id: number) => void;
@@ -77,28 +74,148 @@ interface JournalState {
 const Ctx = createContext<JournalState | null>(null);
 
 export function JournalProvider({ children }: { children: ReactNode }) {
+  const [session, setSession] = useState<Session | null>(null);
   const [trades, setTrades] = useState<Trade[]>(TRADES);
-  const [journal, setJournal] = useState<JournalEntry[]>(() => [blankJournalEntry(1)]);
+  const [journal, setJournal] = useState<JournalEntry[]>([]);
+  const [journalLoading, setJournalLoading] = useState(true);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [queue, setQueue] = useState<QueuedFill[]>(QUEUE);
   const [captureMode, setCaptureMode] = useState<CaptureMode>("review");
   const [sessionFocus, setSessionFocus] = useState<number>(TODAY.focus);
   const [gateChecked, setGateChecked] = useState<number[]>(TODAY.gateChecked);
 
+  /** Unsaved patch and its pending save timer, per journal row. */
+  const pending = useRef(new Map<number, { patch: Partial<JournalEntry>; timer: number }>());
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    const { data } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
+    return () => data.subscription.unsubscribe();
+  }, []);
+
+  const loadJournal = useCallback(async () => {
+    const { data, error } = await supabase.from("journal_entries").select("*").order("id");
+    if (error) setSyncError(error.message);
+    else setJournal((data as JournalRow[]).map(fromRow));
+    setJournalLoading(false);
+  }, []);
+
+  useEffect(() => {
+    void loadJournal();
+  }, [loadJournal]);
+
+  /** Write a row's batched patch now. On failure, show why and reload the truth from the DB. */
+  const flush = useCallback(
+    async (id: number) => {
+      const item = pending.current.get(id);
+      if (!item) return;
+      clearTimeout(item.timer);
+      pending.current.delete(id);
+
+      const row = toRow(item.patch);
+      if (Object.keys(row).length === 0) return;
+      const { data, error } = await supabase
+        .from("journal_entries")
+        .update(row)
+        .eq("id", id)
+        .select("id");
+      if (error || !data.length) {
+        setSyncError(error?.message ?? NOT_SAVED);
+        void loadJournal();
+      } else {
+        setSyncError(null);
+      }
+    },
+    [loadJournal]
+  );
+
+  const flushAll = useCallback(
+    () => Promise.all([...pending.current.keys()].map(flush)).then(() => undefined),
+    [flush]
+  );
+
+  useEffect(() => {
+    const onHide = () => void flushAll();
+    window.addEventListener("pagehide", onHide);
+    return () => window.removeEventListener("pagehide", onHide);
+  }, [flushAll]);
+
+  const addJournalEntry = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("journal_entries")
+      .insert({ date_time: nowLocalInput() })
+      .select()
+      .single();
+    if (error) {
+      setSyncError(error.message);
+      return;
+    }
+    setSyncError(null);
+    setJournal((prev) => [...prev, fromRow(data as JournalRow)]);
+  }, []);
+
+  const updateJournalEntry = useCallback(
+    (id: number, patch: Partial<JournalEntry>) => {
+      setJournal((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+      const prev = pending.current.get(id);
+      if (prev) clearTimeout(prev.timer);
+      pending.current.set(id, {
+        patch: { ...prev?.patch, ...patch },
+        timer: window.setTimeout(() => void flush(id), SAVE_DELAY_MS),
+      });
+    },
+    [flush]
+  );
+
+  const removeJournalEntry = useCallback(
+    async (id: number) => {
+      const item = pending.current.get(id);
+      if (item) {
+        clearTimeout(item.timer);
+        pending.current.delete(id);
+      }
+      setJournal((prev) => prev.filter((e) => e.id !== id));
+      const { data, error } = await supabase
+        .from("journal_entries")
+        .delete()
+        .eq("id", id)
+        .select("id");
+      if (error || !data.length) {
+        setSyncError(error?.message ?? NOT_SAVED);
+        void loadJournal();
+      } else {
+        setSyncError(null);
+      }
+    },
+    [loadJournal]
+  );
+
+  const signIn = useCallback(async (email: string, password: string) => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    return error ? error.message : null;
+  }, []);
+
+  const signOut = useCallback(async () => {
+    await flushAll();
+    await supabase.auth.signOut();
+  }, [flushAll]);
+
   const value = useMemo<JournalState>(
     () => ({
+      session,
+      signIn,
+      signOut,
+
       trades,
       updateTrade: (id, patch) =>
         setTrades((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t))),
 
       journal,
-      addJournalEntry: () =>
-        setJournal((prev) => [
-          ...prev,
-          blankJournalEntry(prev.reduce((max, e) => Math.max(max, e.id), 0) + 1),
-        ]),
-      updateJournalEntry: (id, patch) =>
-        setJournal((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e))),
-      removeJournalEntry: (id) => setJournal((prev) => prev.filter((e) => e.id !== id)),
+      journalLoading,
+      syncError,
+      addJournalEntry,
+      updateJournalEntry,
+      removeJournalEntry,
 
       queue,
       acceptFill: (id) => setQueue((prev) => prev.filter((q) => q.id !== id)),
@@ -127,7 +244,22 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       captureSources: CAPTURE_SOURCES,
       captureRules: CAPTURE_RULES,
     }),
-    [trades, journal, queue, captureMode, sessionFocus, gateChecked]
+    [
+      session,
+      signIn,
+      signOut,
+      trades,
+      journal,
+      journalLoading,
+      syncError,
+      addJournalEntry,
+      updateJournalEntry,
+      removeJournalEntry,
+      queue,
+      captureMode,
+      sessionFocus,
+      gateChecked,
+    ]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

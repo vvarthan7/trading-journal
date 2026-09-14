@@ -78,7 +78,7 @@ const MIN_WIDTH = COLS.reduce((sum, c) => sum + c.min, 0) + GAP * (COLS.length -
 const GRID = { gridTemplateColumns: TEMPLATE, columnGap: GAP };
 
 const FIELD =
-  "w-full h-[30px] px-2 rounded-sm border border-line-strong bg-bg text-[12.5px] text-ink hover:border-accent-line focus-visible:border-accent transition-colors";
+  "w-full h-[30px] px-2 rounded-sm border border-line-strong bg-bg text-[12.5px] text-ink hover:border-accent-line focus-visible:border-accent disabled:cursor-default disabled:hover:border-line-strong transition-colors";
 
 function Choice<T extends string>({
   value,
@@ -115,7 +115,16 @@ const asOptions = (xs: string[]) => xs.map((x) => ({ value: x, label: x }));
 
 /** Quick per-trade journal: one editable row per trade, behaviour flags as yes/no. */
 export default function TradeJournal() {
-  const { journal, addJournalEntry, updateJournalEntry, removeJournalEntry } = useJournal();
+  const {
+    session,
+    journal,
+    journalLoading,
+    syncError,
+    addJournalEntry,
+    updateJournalEntry,
+    removeJournalEntry,
+  } = useJournal();
+  const canEdit = session !== null;
 
   const set = (id: number, patch: Partial<JournalEntry>) => updateJournalEntry(id, patch);
 
@@ -127,10 +136,21 @@ export default function TradeJournal() {
         <span className="text-[11.5px] text-dim">
           {journal.length} {journal.length === 1 ? "entry" : "entries"}
         </span>
+        {syncError ? (
+          <span className="ml-auto text-[11.5px] text-loss">{syncError}</span>
+        ) : (
+          !canEdit && (
+            <span className="ml-auto flex items-center gap-1 text-[11.5px] text-dim">
+              <i className="ph ph-lock-simple text-[12px]" />
+              Read only
+            </span>
+          )
+        )}
       </div>
 
       <div className="overflow-x-auto">
-        <div style={{ minWidth: MIN_WIDTH }}>
+        {/* A disabled fieldset makes every control inside it read-only in one place. */}
+        <fieldset disabled={!canEdit} style={{ minWidth: MIN_WIDTH }}>
           {/* Header row */}
           <div
             className="grid items-center px-6 py-3 border-b border-line-strong text-[10.5px] leading-[1.3] tracking-[0.08em] uppercase text-dim"
@@ -226,28 +246,43 @@ export default function TradeJournal() {
                 />
               ))}
 
-              <button
-                type="button"
-                aria-label={`Remove row ${i + 1}`}
-                disabled={journal.length === 1}
-                onClick={() => removeJournalEntry(e.id)}
-                className="grid place-items-center h-[24px] w-[24px] rounded-sm border-0 bg-transparent text-dim cursor-pointer hover:text-loss hover:bg-bg disabled:opacity-30 disabled:cursor-default disabled:hover:text-dim disabled:hover:bg-transparent transition-colors"
-              >
-                <i className="ph ph-x text-[13px]" />
-              </button>
+              {canEdit ? (
+                <button
+                  type="button"
+                  aria-label={`Remove row ${i + 1}`}
+                  onClick={() => {
+                    if (window.confirm(`Delete row ${i + 1}? This can't be undone.`)) {
+                      void removeJournalEntry(e.id);
+                    }
+                  }}
+                  className="grid place-items-center h-[24px] w-[24px] rounded-sm border-0 bg-transparent text-dim cursor-pointer hover:text-loss hover:bg-bg transition-colors"
+                >
+                  <i className="ph ph-x text-[13px]" />
+                </button>
+              ) : (
+                <span />
+              )}
             </div>
           ))}
-        </div>
+
+          {journal.length === 0 && (
+            <div className="px-6 py-6 text-[12.5px] text-dim">
+              {journalLoading ? "Loading…" : "No entries yet."}
+            </div>
+          )}
+        </fieldset>
       </div>
 
-      <button
-        type="button"
-        onClick={addJournalEntry}
-        className="flex items-center gap-2 w-full px-6 py-3 border-0 bg-transparent cursor-pointer text-[12.5px] text-accent-deep hover:bg-subtle transition-colors"
-      >
-        <i className="ph ph-plus text-[13px]" />
-        Add row
-      </button>
+      {canEdit && (
+        <button
+          type="button"
+          onClick={() => void addJournalEntry()}
+          className="flex items-center gap-2 w-full px-6 py-3 border-0 bg-transparent cursor-pointer text-[12.5px] text-accent-deep hover:bg-subtle transition-colors"
+        >
+          <i className="ph ph-plus text-[13px]" />
+          Add row
+        </button>
+      )}
     </div>
   );
 }

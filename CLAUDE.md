@@ -17,13 +17,28 @@ and it is a strict one: `strict`, `noUnusedLocals`, `noUnusedParameters`, and
 
 ## Architecture
 
-React 19 + Vite + TypeScript + Tailwind v4, no backend yet. Phase 1 is the design running on
-mock data; phase 2 swaps in a FastAPI + SQLite service without touching the screens.
+React 19 + Vite + TypeScript + Tailwind v4, with Supabase (Postgres + Auth) as the backend.
+Only the dashboard journal (`journal_entries`) is persisted so far; every other screen still
+runs on mock data.
+
+**Supabase.** The client is `src/lib/supabase.ts`, reading `VITE_SUPABASE_URL` and
+`VITE_SUPABASE_PUBLISHABLE_KEY` from `.env.local`. The schema is managed in the Supabase SQL
+editor — there are no migrations in this repo. RLS on `journal_entries`: anyone may select;
+insert/update/delete require the signed-in owner (`user_id = auth.uid()`, which is also the
+column default). Sign-ups are disabled; the one user signs in on `SignInScreen`, an unlinked
+page at `VITE_SIGN_IN_PATH` (default `/signin`) that sits outside the sidebar shell and
+redirects to `/dashboard`. Nothing links to it — signed-out viewers see no sign-in control
+anywhere, and the journal renders read-only. `AuthPanel` in the sidebar appears only when
+signed in, for sign-out. An RLS-blocked write returns no error, only zero
+rows, so writes chain `.select("id")` and treat an empty result as a failure.
 
 **The store is the intended seam.** `src/store.tsx` exposes `useJournal()`, a context holding
 `useState(MOCK)` plus mutators (`updateTrade`, `acceptFill`, `discardFill`, `toggleGate`, …).
-In phase 2 those `useState` calls become fetches and the mutators become PATCH/POST — every
-screen keeps working. Keep new data access going through this hook.
+Moving a slice to the backend means those `useState` calls become fetches and the mutators become
+writes — every screen keeps working. Keep new data access going through this hook. `journal`
+already works this way: it loads from `journal_entries`, edits apply locally at once and are
+batched per row into one UPDATE 500ms later, and the camelCase ↔ snake_case mapping lives in
+`src/lib/journalRows.ts`.
 
 **That seam currently leaks.** Two screens import from `src/data/mock.ts` directly instead of
 going through the store: `ReviewScreen.tsx` (`DEPOSIT_MARKS`, `EQUITY_LABELS`,
@@ -35,7 +50,8 @@ Prefer routing new ones through the store rather than adding to the direct-impor
 trip, not the raw fill. Change it with that in mind; phase 2 builds tables from it.
 
 **Routing** is flat in `App.tsx`: `/dashboard`, `/session`, `/trades`, `/trades/:id`, `/review`, `/playbook`,
-`/capture`, with `/` and `*` redirecting to `/dashboard` (the landing page). Layout is a fixed 212px sidebar grid
+`/capture`, with `/` and `*` redirecting to `/dashboard` (the landing page). These sit inside
+`Shell`; the sign-in route is matched first, outside it, so it renders without the sidebar. Layout is a fixed 212px sidebar grid
 plus a `min-w-[1180px]` main column — this is a desktop-only design, not responsive.
 
 **Derived numbers live in `src/lib/format.ts`**, not in components: `computeKpis`, `money`,

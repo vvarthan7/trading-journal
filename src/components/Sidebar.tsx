@@ -1,4 +1,5 @@
 import { NavLink } from "react-router-dom";
+import AuthPanel from "./AuthPanel";
 
 interface SidebarProps {
   capital: number;
@@ -79,6 +80,10 @@ export default function Sidebar({ queueCount }: SidebarProps) {
           </NavLink>
         ))}
       </nav>
+
+      <div className="mt-auto">
+        <AuthPanel />
+      </div>
 
       {/* Bottom section (broker link + capital) — hidden for now */}
       {/* <div className="mt-auto flex flex-col gap-6">
