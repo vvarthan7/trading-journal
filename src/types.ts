@@ -2,6 +2,20 @@ export type PlanAdherence = "on" | "partly" | "off";
 export type Basis = "technical" | "news" | "mixed";
 export type Direction = "long" | "short";
 
+/**
+ * One broker fill inside a round trip. A trade held from flat to flat can be built from several
+ * entries and several exits, each with its own time and quantity.
+ */
+export interface TradeLeg {
+  side: "entry" | "exit";
+  /** hh:mm */
+  time: string;
+  price: number;
+  units: number;
+  lots: number | null;
+  fillId: string;
+}
+
 export interface Trade {
   id: number;
   /** ISO date of entry, yyyy-mm-dd */
@@ -50,6 +64,13 @@ export interface Trade {
   exitIndex: number;
 
   screenshotUrl?: string | null;
+
+  /** Where the row came from. Broker rows carry no journalled fields yet. */
+  source?: "manual" | "broker";
+  /** The fills behind the round trip, when it was built from broker data. */
+  legs?: TradeLeg[];
+  /** True while the position is still held, so there is no exit price or P&L yet. */
+  open?: boolean;
 }
 
 export type YesNo = "yes" | "no";

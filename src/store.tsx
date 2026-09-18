@@ -6,6 +6,10 @@ import { missingFields, nextLevel, nowLocalInput } from "./lib/format";
 import { supabase } from "./lib/supabase";
 import { fromRow, toRow } from "./lib/journalRows";
 import type { JournalRow } from "./lib/journalRows";
+import { brokerConfigured as isBrokerConfigured, fetchTradeBook } from "./lib/smartapi";
+import { toLots } from "./lib/tradeLots";
+import { fromRow as tradeFromRow, toInsert } from "./lib/tradeRows";
+import type { DbTrade, TradeRow } from "./lib/tradeRows";
 import {
   CAPITAL_EVENTS,
   CAPTURE_RULES,
@@ -37,6 +41,18 @@ interface JournalState {
 
   trades: Trade[];
   updateTrade: (id: number, patch: Partial<Trade>) => void;
+
+  /** Lots stored in `public.trades`, newest first. */
+  dbTrades: DbTrade[];
+  tradesLoading: boolean;
+  tradesError: string | null;
+  syncing: boolean;
+  /** False until the SmartAPI credentials are filled in `.env.local`. */
+  brokerConfigured: boolean;
+  /** Pull today's fills, FIFO-match them into lots, and upsert them into `trades`. */
+  syncBrokerTrades: () => Promise<void>;
+  /** The initial stop loss, typed by hand. Postgres recomputes risk and R from it. */
+  setTradeStop: (id: number, stop: number | null) => void;
 
   journal: JournalEntry[];
   journalLoading: boolean;
@@ -79,6 +95,10 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   const [journal, setJournal] = useState<JournalEntry[]>([]);
   const [journalLoading, setJournalLoading] = useState(true);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [dbTrades, setDbTrades] = useState<DbTrade[]>([]);
+  const [tradesLoading, setTradesLoading] = useState(true);
+  const [tradesError, setTradesError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
   const [queue, setQueue] = useState<QueuedFill[]>(QUEUE);
   const [captureMode, setCaptureMode] = useState<CaptureMode>("review");
   const [sessionFocus, setSessionFocus] = useState<number>(TODAY.focus);
@@ -92,6 +112,79 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     const { data } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
     return () => data.subscription.unsubscribe();
   }, []);
+
+  /** Pending stop writes per row, debounced like the journal's edits. */
+  const pendingStops = useRef(new Map<number, number>());
+
+  const loadTrades = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("trades")
+      .select("*")
+      .order("trade_date", { ascending: false })
+      .order("entry_time", { ascending: false });
+    if (error) setTradesError(error.message);
+    else {
+      setDbTrades((data as TradeRow[]).map(tradeFromRow));
+      setTradesError(null);
+    }
+    setTradesLoading(false);
+  }, []);
+
+  useEffect(() => {
+    void loadTrades();
+  }, [loadTrades]);
+
+  const syncBrokerTrades = useCallback(async () => {
+    if (!isBrokerConfigured()) return;
+    setSyncing(true);
+    try {
+      const lots = toLots(await fetchTradeBook());
+      if (lots.length > 0) {
+        // Keyed on (user_id, entry_fill_id, lot_seq), so re-running a sync updates the rows it
+        // wrote before rather than duplicating them — and leaves stop_price untouched.
+        const { data, error } = await supabase
+          .from("trades")
+          .upsert(lots.map(toInsert), { onConflict: "user_id,entry_fill_id,lot_seq" })
+          .select("id");
+        if (error) throw new Error(error.message);
+        if (!data.length) throw new Error(NOT_SAVED);
+      }
+      await loadTrades();
+    } catch (e) {
+      setTradesError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSyncing(false);
+    }
+  }, [loadTrades]);
+
+  const flushStop = useCallback(
+    async (id: number, stop: number | null) => {
+      pendingStops.current.delete(id);
+      const { data, error } = await supabase
+        .from("trades")
+        .update({ stop_price: stop })
+        .eq("id", id)
+        .select("id");
+      if (error || !data.length) setTradesError(error?.message ?? NOT_SAVED);
+      else setTradesError(null);
+      // Reload either way: Postgres recomputes initial_risk and rr from the new stop.
+      void loadTrades();
+    },
+    [loadTrades]
+  );
+
+  const setTradeStop = useCallback(
+    (id: number, stop: number | null) => {
+      setDbTrades((prev) => prev.map((t) => (t.id === id ? { ...t, stopPrice: stop } : t)));
+      const timer = pendingStops.current.get(id);
+      if (timer) clearTimeout(timer);
+      pendingStops.current.set(
+        id,
+        window.setTimeout(() => void flushStop(id, stop), SAVE_DELAY_MS)
+      );
+    },
+    [flushStop]
+  );
 
   const loadJournal = useCallback(async () => {
     const { data, error } = await supabase.from("journal_entries").select("*").order("id");
@@ -215,6 +308,14 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       updateTrade: (id, patch) =>
         setTrades((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t))),
 
+      dbTrades,
+      tradesLoading,
+      tradesError,
+      syncing,
+      brokerConfigured: isBrokerConfigured(),
+      syncBrokerTrades,
+      setTradeStop,
+
       journal,
       journalLoading,
       syncError,
@@ -254,6 +355,12 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       signIn,
       signOut,
       trades,
+      dbTrades,
+      tradesLoading,
+      tradesError,
+      syncing,
+      syncBrokerTrades,
+      setTradeStop,
       journal,
       journalLoading,
       syncError,
