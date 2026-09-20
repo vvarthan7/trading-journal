@@ -3,6 +3,7 @@ import Sidebar from "./components/Sidebar";
 import DashboardScreen from "./screens/DashboardScreen";
 import SessionScreen from "./screens/SessionScreen";
 import TradesScreen from "./screens/TradesScreen";
+import TradeHistoryScreen from "./screens/TradeHistoryScreen";
 import TradeDetailScreen from "./screens/TradeDetailScreen";
 import ReviewScreen from "./screens/ReviewScreen";
 import PlaybookScreen from "./screens/PlaybookScreen";
@@ -43,6 +44,7 @@ function Shell() {
           <Route path="/dashboard" element={<DashboardScreen />} />
           <Route path="/session" element={<SessionScreen />} />
           <Route path="/trades" element={<TradesScreen />} />
+          <Route path="/history" element={<TradeHistoryScreen />} />
           <Route path="/trades/:id" element={<TradeDetailScreen />} />
           <Route path="/review" element={<ReviewScreen />} />
           <Route path="/playbook" element={<PlaybookScreen />} />

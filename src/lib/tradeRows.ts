@@ -38,7 +38,6 @@ export interface TradeRow {
   initial_risk: number | string | null;
   rr: number | string | null;
 
-  notes: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -112,8 +111,9 @@ export function fromRow(r: TradeRow): DbTrade {
 }
 
 /**
- * The columns a sync owns. Deliberately excludes `stop_price` and `notes`, which are typed by
- * hand and must survive a re-sync, and the generated columns, which Postgres refuses to accept.
+ * The columns a sync owns. Deliberately excludes `stop_price`, the one hand-entered column,
+ * which must survive a re-sync, and the generated columns, which Postgres refuses to accept.
+ * The idea, the notes and the strategies all live in `trade_details`, not here.
  */
 export function toInsert(lot: TradeLot): Record<string, unknown> {
   return {

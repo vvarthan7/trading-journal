@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import type { JournalEntry, PlanAdherence, QueuedFill, Trade } from "./types";
-import { missingFields, nextLevel, nowLocalInput } from "./lib/format";
+import { missingFields, nextLevel, nowLocalInput, todayIso } from "./lib/format";
 import { supabase } from "./lib/supabase";
 import { fromRow, toRow } from "./lib/journalRows";
 import type { JournalRow } from "./lib/journalRows";
@@ -42,8 +42,10 @@ interface JournalState {
   trades: Trade[];
   updateTrade: (id: number, patch: Partial<Trade>) => void;
 
-  /** Lots stored in `public.trades`, newest first. */
+  /** Every lot stored in `public.trades`, newest first. Read from Supabase, never the broker. */
   dbTrades: DbTrade[];
+  /** The `dbTrades` dated today — what the Trades screen works on. */
+  todayTrades: DbTrade[];
   tradesLoading: boolean;
   tradesError: string | null;
   syncing: boolean;
@@ -51,6 +53,8 @@ interface JournalState {
   brokerConfigured: boolean;
   /** Pull today's fills, FIFO-match them into lots, and upsert them into `trades`. */
   syncBrokerTrades: () => Promise<void>;
+  /** Re-read `trades` from Supabase. No broker call — this is what the history screen uses. */
+  reloadTrades: () => Promise<void>;
   /** The initial stop loss, typed by hand. Postgres recomputes risk and R from it. */
   setTradeStop: (id: number, stop: number | null) => void;
 
@@ -113,8 +117,8 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     return () => data.subscription.unsubscribe();
   }, []);
 
-  /** Pending stop writes per row, debounced like the journal's edits. */
-  const pendingStops = useRef(new Map<number, number>());
+  /** Unsaved column patch and its pending save timer, per `trades` row. */
+  const pendingTrades = useRef(new Map<number, { row: Record<string, unknown>; timer: number }>());
 
   const loadTrades = useCallback(async () => {
     const { data, error } = await supabase
@@ -157,33 +161,45 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     }
   }, [loadTrades]);
 
-  const flushStop = useCallback(
-    async (id: number, stop: number | null) => {
-      pendingStops.current.delete(id);
+  const flushTrade = useCallback(
+    async (id: number) => {
+      const item = pendingTrades.current.get(id);
+      if (!item) return;
+      clearTimeout(item.timer);
+      pendingTrades.current.delete(id);
+
       const { data, error } = await supabase
         .from("trades")
-        .update({ stop_price: stop })
+        .update(item.row)
         .eq("id", id)
         .select("id");
-      if (error || !data.length) setTradesError(error?.message ?? NOT_SAVED);
-      else setTradesError(null);
-      // Reload either way: Postgres recomputes initial_risk and rr from the new stop.
-      void loadTrades();
+      const failed = Boolean(error) || !data || data.length === 0;
+      setTradesError(failed ? (error?.message ?? NOT_SAVED) : null);
+      // A rejected write must never leave its optimistic value sitting on screen looking saved,
+      // so any failure re-reads the truth. RLS rejects by matching zero rows rather than
+      // erroring, which is why `data.length` counts as a failure here too.
+      if (failed || "stop_price" in item.row) void loadTrades();
     },
     [loadTrades]
   );
 
-  const setTradeStop = useCallback(
-    (id: number, stop: number | null) => {
-      setDbTrades((prev) => prev.map((t) => (t.id === id ? { ...t, stopPrice: stop } : t)));
-      const timer = pendingStops.current.get(id);
-      if (timer) clearTimeout(timer);
-      pendingStops.current.set(
-        id,
-        window.setTimeout(() => void flushStop(id, stop), SAVE_DELAY_MS)
-      );
+  /** Apply a patch locally at once and batch the write, the way journal edits work. */
+  const patchTrade = useCallback(
+    (id: number, local: Partial<DbTrade>, row: Record<string, unknown>) => {
+      setDbTrades((prev) => prev.map((t) => (t.id === id ? { ...t, ...local } : t)));
+      const prev = pendingTrades.current.get(id);
+      if (prev) clearTimeout(prev.timer);
+      pendingTrades.current.set(id, {
+        row: { ...prev?.row, ...row },
+        timer: window.setTimeout(() => void flushTrade(id), SAVE_DELAY_MS),
+      });
     },
-    [flushStop]
+    [flushTrade]
+  );
+
+  const setTradeStop = useCallback(
+    (id: number, stop: number | null) => patchTrade(id, { stopPrice: stop }, { stop_price: stop }),
+    [patchTrade]
   );
 
   const loadJournal = useCallback(async () => {
@@ -228,10 +244,13 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    const onHide = () => void flushAll();
+    const onHide = () => {
+      void flushAll();
+      for (const id of [...pendingTrades.current.keys()]) void flushTrade(id);
+    };
     window.addEventListener("pagehide", onHide);
     return () => window.removeEventListener("pagehide", onHide);
-  }, [flushAll]);
+  }, [flushAll, flushTrade]);
 
   const addJournalEntry = useCallback(async () => {
     // Every existing row must be complete before another can be started.
@@ -298,6 +317,12 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut();
   }, [flushAll]);
 
+  /** Recomputed only when the stored lots change; the date is read once per pass. */
+  const todayTrades = useMemo(() => {
+    const date = todayIso();
+    return dbTrades.filter((t) => t.tradeDate === date);
+  }, [dbTrades]);
+
   const value = useMemo<JournalState>(
     () => ({
       session,
@@ -309,11 +334,13 @@ export function JournalProvider({ children }: { children: ReactNode }) {
         setTrades((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t))),
 
       dbTrades,
+      todayTrades,
       tradesLoading,
       tradesError,
       syncing,
       brokerConfigured: isBrokerConfigured(),
       syncBrokerTrades,
+      reloadTrades: loadTrades,
       setTradeStop,
 
       journal,
@@ -356,10 +383,12 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       signOut,
       trades,
       dbTrades,
+      todayTrades,
       tradesLoading,
       tradesError,
       syncing,
       syncBrokerTrades,
+      loadTrades,
       setTradeStop,
       journal,
       journalLoading,

@@ -54,6 +54,17 @@ export function longDay(iso: string): string {
 }
 
 /**
+ * A stored `timestamptz` as "18 Sep 2026 · 14:32", in the reader's zone. The date-only helpers
+ * above pin midnight onto a yyyy-mm-dd; this one takes a real instant and must not.
+ */
+export function stampLabel(iso: string): string {
+  const d = new Date(iso);
+  const day = d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  const time = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  return `${day} · ${time}`;
+}
+
+/**
  * Level play: six levels of ten boxes. Each journal entry is put on a level by hand, so a level
  * can be left early (say after 6 or 8 wins) and its unused boxes are skipped — but only once it
  * has `WINS_TO_ADVANCE` wins. Without them the next level stays locked.
@@ -127,6 +138,11 @@ export function nowLocalInput(): string {
   const d = new Date();
   d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
   return d.toISOString().slice(0, 16);
+}
+
+/** Today in yyyy-mm-dd, local — the shape `trades.trade_date` is stored in. */
+export function todayIso(): string {
+  return nowLocalInput().slice(0, 10);
 }
 
 /** Build an SVG path string from a numeric series scaled into a box. */

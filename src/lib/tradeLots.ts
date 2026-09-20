@@ -14,6 +14,7 @@
 import type { Direction } from "../types";
 import type { SmartApiFill } from "./smartapi";
 import { kindOf, seconds } from "./brokerTrades";
+import { todayIso } from "./format";
 
 /** A row of `public.trades` as the matcher produces it, before it reaches the database. */
 export interface TradeLot {
@@ -48,13 +49,6 @@ interface OpenLot {
   direction: Direction;
 }
 
-/** Today in yyyy-mm-dd, local. The trade book only ever returns the current session. */
-function today(): string {
-  const d = new Date();
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-  return d.toISOString().slice(0, 10);
-}
-
 export function toLots(fills: SmartApiFill[]): TradeLot[] {
   const groups = new Map<string, SmartApiFill[]>();
   for (const f of fills) {
@@ -64,7 +58,8 @@ export function toLots(fills: SmartApiFill[]): TradeLot[] {
     else groups.set(key, [f]);
   }
 
-  const date = today();
+  // The trade book only ever returns the current session, so every lot is dated today.
+  const date = todayIso();
   const lots: TradeLot[] = [];
 
   for (const bucket of groups.values()) {

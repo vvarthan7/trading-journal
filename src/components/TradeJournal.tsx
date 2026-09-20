@@ -8,23 +8,10 @@ import {
   missingFields,
   nextLevel,
 } from "../lib/format";
+import { STRATEGIES } from "../lib/strategies";
 import { LOSS, WIN } from "./ui";
 
 const TRADE_TYPES = ["Options Selling", "Options Buying", "Index Futures", "Equity"];
-
-const STRATEGIES = [
-  "123",
-  "KAR",
-  "Adv KAR",
-  "ID type A",
-  "ID type B",
-  "ID type A multi",
-  "ID type B multi",
-  "ID PP in wick",
-  "A.Imb",
-  "A.Imb-Fail",
-  "D-UW",
-];
 
 type FlagKey =
   | "rulesFollowed"

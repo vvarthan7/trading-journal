@@ -40,19 +40,89 @@ already works this way: it loads from `journal_entries`, edits apply locally at 
 batched per row into one UPDATE 500ms later, and the camelCase ↔ snake_case mapping lives in
 `src/lib/journalRows.ts`.
 
-**That seam currently leaks.** Two screens import from `src/data/mock.ts` directly instead of
-going through the store: `ReviewScreen.tsx` (`DEPOSIT_MARKS`, `EQUITY_LABELS`,
-`DISCIPLINE_STATS`, `STRATEGY_STATS`, `STYLE_STATS`, `TAG_STATS`) and `TradeDetailScreen.tsx`
-(`BUCKET_NOTE`). These are the derived/aggregate values the backend will eventually compute.
-Prefer routing new ones through the store rather than adding to the direct-import set.
+**That seam currently leaks.** `ReviewScreen.tsx` imports from `src/data/mock.ts` directly
+instead of going through the store (`DEPOSIT_MARKS`, `EQUITY_LABELS`, `DISCIPLINE_STATS`,
+`STRATEGY_STATS`, `STYLE_STATS`, `TAG_STATS`) — the derived/aggregate values the backend will
+eventually compute. Prefer routing new ones through the store rather than adding to the
+direct-import set.
 
 **`src/types.ts` is written to be the DB schema**, not just view models — `Trade` is the round
 trip, not the raw fill. Change it with that in mind; phase 2 builds tables from it.
 
-**Routing** is flat in `App.tsx`: `/dashboard`, `/session`, `/trades`, `/trades/:id`, `/review`, `/playbook`,
-`/capture`, with `/` and `*` redirecting to `/dashboard` (the landing page). These sit inside
+**Routing** is flat in `App.tsx`: `/dashboard`, `/session`, `/trades`, `/trades/:id`, `/history`,
+`/review`, `/playbook`, `/capture`, with `/` and `*` redirecting to `/dashboard` (the landing
+page). `/trades` and `/history` are the same table over the same `trades` rows — `TradesScreen`
+is scoped to `todayTrades` and owns the broker sync, `TradeHistoryScreen` shows every stored lot
+and only ever reads Supabase (SmartAPI has no historical trade book, so history cannot come from
+the broker). Neither is in the sidebar today; they link to each other, and each row's instrument
+links to `/trades/:id`, passing `state.from` so Back returns to the table it came from.
+
+**`TradeDetailScreen` runs on `dbTrades`**, so `:id` is a `public.trades` primary key.
+
+**`trades` holds fact; three tables hang off it.** The split is deliberate: `trades` is what the
+broker reported plus what Postgres generated from it, and everything you *write* about a trade
+lives elsewhere, keyed on `trade_id`.
+
+| | what | shape |
+|---|---|---|
+| `trades` | instrument, prices, times, P&L, R:R | one row per entry lot |
+| `trade_details` | the idea, the notes, the strategies used | `kind = 'idea'` (at most one, partial unique index), `'note'` (any number, timestamped), or `'strategy'` (one row per strategy selected, no duplicates) |
+| `trade_screenshots` | one row per image; bytes in the private bucket | any number per trade |
+
+`stop_price` is the only hand-entered column left on `trades`, because Postgres generates
+`initial_risk` and `rr` straight from it. It is excluded from `toInsert`, so a re-sync cannot
+overwrite it.
+
+**A multi-select is rows, not an array.** `strategies` was a `text[]` on `trades` and is now one
+`kind = 'strategy'` row per selection, so everything you enter by hand is in one table and
+`select trade_id from trade_details where kind = 'strategy' and body = 'KAR'` answers "every
+trade that used KAR". The names are plain text from the fixed list in `src/lib/strategies.ts`
+(there is no strategies table to point a foreign key at); that same list feeds the dashboard
+journal's single-select, so do not fork it. `SessionScreen.tsx` still links to `/trades/:id` with a *mock* trade
+id, so those links land on the "not in the journal" fallback; that screen is unlinked from the
+sidebar and still entirely mock. These sit inside
 `Shell`; the sign-in route is matched first, outside it, so it renders without the sidebar. Layout is a fixed 212px sidebar grid
 plus a `min-w-[1180px]` main column — this is a desktop-only design, not responsive.
+
+**The SQL files are a history, and order matters.** Run them in the SQL editor in the order
+listed at the top of each: `trades.sql` → `trades_lot_seq.sql` → `trade_notes.sql` →
+`trades_idea_strategies.sql` → `trade_screenshots.sql` → `trade_details.sql` →
+`trade_screenshots_table.sql`. The later files migrate the earlier shapes forward —
+`trade_details.sql` absorbs `trade_notes` and `trades.idea` then drops both;
+`trade_screenshots_table.sql` adopts images already sitting in the bucket. Every migration block
+is guarded on the old thing still existing, so re-running a file is safe. The superseded files
+are kept because they are the record of what the database has actually had done to it.
+
+**Screenshots: rows link, Storage holds.** `trade_screenshots` rows are the linkage — a folder
+convention was not a foreign key, so nothing stopped a path outliving its trade. The bytes stay
+in the **private** `trade-screenshots` bucket (same reasoning as `trades` having no public
+select policy: the publishable key ships in the bundle), read through one-hour signed URLs. Path
+layout is still `{user_id}/{trade_id}/{uuid}.{ext}`, which is what the bucket policies check.
+`TradeScreenshots.tsx` takes files from the picker, a drop, or a window-level `paste` listener —
+all three funnel into one `add()`.
+
+**A failed write must never look saved.** Both trade writes are optimistic — the value lands on
+screen before Postgres has seen it — so `flushTrade` re-reads the row on *any* failure, and RLS
+counts as a failure by matching zero rows rather than erroring (`data.length === 0`). Screens
+that let you edit a trade must render `tradesError`; `TradeDetailScreen` does, next to the stop.
+A silently dropped write is the bug this shape is prone to.
+
+**Writing saves differently depending on how it is written.** The idea is one box you keep
+editing, so it debounces at 500ms like the journal's fields (and flushes on blur and on unmount,
+since navigating away fires no blur). A note is posted deliberately, so it writes on Add and
+commits on Save — a half-typed note is never stored. Clearing the idea deletes its row, because
+`body` may not be blank.
+
+**`trade_notes` and screenshots are the two deliberate exceptions to "data access goes through
+`useJournal`".** Both are scoped to a single trade and read only on its detail screen, so they
+load in the component (`src/lib/tradeNotes.ts`, `src/lib/tradeShots.ts`) rather than in the
+store — fetching every note and every image for every trade at boot would be work nothing asks
+for. Anything app-wide still belongs in the store.
+
+`dbTrades` edits are debounced the same way the journal's are: `patchTrade` in `store.tsx`
+applies the change locally at once and batches one UPDATE per row 500ms later, reloading only
+when `stop_price` moved (Postgres regenerates `initial_risk` and `rr` from it; `notes` derives
+nothing, and reloading mid-typing would fight the textarea).
 
 **Derived numbers live in `src/lib/format.ts`**, not in components: `computeKpis`, `money`,
 `price`, `rLabel`, `plan{Label,Tone}`, `pnlTone`, the date formatters, and `seriesPath` (which
