@@ -1,5 +1,5 @@
 import { useJournal } from "../store";
-import { LEVELS, TRADES_PER_LEVEL, WINS_TO_ADVANCE, levelWins } from "../lib/format";
+import { LEVELS, TRADES_PER_LEVEL, WINS_TO_ADVANCE, levelWins, plain } from "../lib/format";
 
 /**
  * Six levels of ten boxes each. Every journal entry lands in the next box of the level picked
@@ -21,7 +21,7 @@ export default function LevelPlay() {
       </div>
 
       <div className="px-6 py-6 flex flex-col gap-4">
-        <div className="grid grid-cols-[72px_1fr_40px] items-center gap-5">
+        <div className="grid grid-cols-[72px_1fr_40px_76px] items-center gap-5">
           <span />
           <div className="grid grid-cols-10 gap-3">
             {Array.from({ length: TRADES_PER_LEVEL }, (_, b) => (
@@ -31,6 +31,7 @@ export default function LevelPlay() {
             ))}
           </div>
           <span />
+          <span className="text-right text-[11.5px] text-dim">Total loss</span>
         </div>
         {Array.from({ length: LEVELS }, (_, i) => i + 1).map((level) => {
           const entries = journal.filter((e) => e.level === level);
@@ -41,7 +42,7 @@ export default function LevelPlay() {
             entries.length === 0 &&
             levelWins(journal, level - 1) < WINS_TO_ADVANCE;
           return (
-            <div key={level} className="grid grid-cols-[72px_1fr_40px] items-center gap-5">
+            <div key={level} className="grid grid-cols-[72px_1fr_40px_76px] items-center gap-5">
               <span className="flex items-center gap-1 text-[13px] text-muted">
                 Level {level}
                 {locked && (
@@ -90,6 +91,12 @@ export default function LevelPlay() {
                 className={`text-[13px] font-medium ${wins > 0 ? "text-win" : "text-dim"}`}
               >
                 {wins} W
+              </span>
+              <span
+                title={`${level} lot${level > 1 ? "s" : ""} · 65 qty · 10 pts × ${TRADES_PER_LEVEL} trades`}
+                className="text-right text-[13px] text-loss"
+              >
+                {plain(level * 65 * 10 * TRADES_PER_LEVEL)}
               </span>
             </div>
           );
