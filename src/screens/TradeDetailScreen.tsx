@@ -14,6 +14,7 @@ import type { DbTrade } from "../lib/tradeRows";
 import TradeScreenshots from "../components/TradeScreenshots";
 import TradeDetails from "../components/TradeDetails";
 import { dayLabel, money, plain, pnlTone, price, rLabel } from "../lib/format";
+import { TRADE_TYPES, autoTypeOf, effectiveType } from "../lib/tradeTypes";
 import { Divider, Eyebrow, WIN, LOSS } from "../components/ui";
 
 /** Shown wherever there is nothing yet — no exit, or no stop typed in. */
@@ -88,7 +89,10 @@ export default function TradeDetailScreen() {
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const { dbTrades, tradesLoading, tradesError, setTradeStop } = useJournal();
+  const { dbTrades, tradeGroups, tradesLoading, tradesError, setTradeStop, setTradeType, session } =
+    useJournal();
+  /** Rupee amounts and size are the owner's business — a signed-out visitor sees the shape only. */
+  const signedIn = session !== null;
 
   /** Where the row was clicked from, so Back returns there rather than always to /trades. */
   const from = (location.state as { from?: string } | null)?.from ?? "/trades";
@@ -115,6 +119,9 @@ export default function TradeDetailScreen() {
     );
   }
 
+  /** The basket this leg belongs to, when it is part of one rather than a trade on its own. */
+  const basket = t.groupId === null ? null : (tradeGroups.find((g) => g.id === t.groupId) ?? null);
+
   const turnover = t.entryPrice * t.quantity;
   const riskPerUnit = t.stopPrice === null ? null : Math.abs(t.entryPrice - t.stopPrice);
   const returnPct = t.pnl === null || turnover === 0 ? null : (t.pnl / turnover) * 100;
@@ -123,8 +130,8 @@ export default function TradeDetailScreen() {
     { k: "Direction", v: t.direction, color: "var(--color-accent-deep)" },
     { k: "Instrument type", v: t.type || DASH, color: "var(--color-muted)" },
     { k: "Exchange", v: t.exchange || DASH, color: "var(--color-muted)" },
-    { k: "Quantity", v: String(t.quantity), color: "var(--color-muted)" },
-    { k: "Lots", v: t.lot === null ? DASH : String(t.lot), color: "var(--color-muted)" },
+    { k: "Quantity", v: String(t.quantity), color: "var(--color-muted)", owner: true },
+    { k: "Lots", v: t.lot === null ? DASH : String(t.lot), color: "var(--color-muted)", owner: true },
     { k: "Entry price", v: price(t.entryPrice), color: "var(--color-muted)" },
     {
       k: "Exit price",
@@ -134,7 +141,7 @@ export default function TradeDetailScreen() {
     { k: "Entry time", v: t.entryTime || DASH, color: "var(--color-muted)" },
     { k: "Exit time", v: t.exitTime || DASH, color: "var(--color-muted)" },
     { k: "Hold", v: heldLabel(t.entryTime, t.exitTime), color: "var(--color-muted)" },
-    { k: "Turnover", v: plain(turnover), color: "var(--color-muted)" },
+    { k: "Turnover", v: plain(turnover), color: "var(--color-muted)", owner: true },
     {
       k: "Return on turnover",
       v: returnPct === null ? DASH : `${returnPct >= 0 ? "+" : "−"}${Math.abs(returnPct).toFixed(2)}%`,
@@ -149,13 +156,14 @@ export default function TradeDetailScreen() {
       k: "Initial risk",
       v: t.initialRisk === null ? DASH : plain(t.initialRisk),
       color: "var(--color-muted)",
+      owner: true,
     },
     {
       k: "Realised",
       v: t.rr === null ? DASH : rLabel(t.rr),
       color: t.rr === null ? "var(--color-muted)" : t.rr >= 0 ? WIN : LOSS,
     },
-  ];
+  ].filter((f) => signedIn || !f.owner);
 
   return (
     <div className="p-8 pb-20 flex flex-col gap-6">
@@ -191,23 +199,34 @@ export default function TradeDetailScreen() {
                 open
               </span>
             )}
+            {/* A leg of a basket is not a trade on its own — say so, and say which. */}
+            {basket && (
+              <Link
+                to={`/groups/${basket.id}`}
+                state={{ from }}
+                className="text-[11.5px] px-3 py-[3px] rounded-sm border border-accent text-accent-deep no-underline hover:bg-accent-line transition-colors"
+              >
+                <i className="ph ph-stack" /> {basket.name}
+              </Link>
+            )}
           </div>
           <div className="text-[13px] text-muted">
-            {dayLabel(t.tradeDate)} · {t.entryTime || DASH} → {t.exitTime || DASH} ·{" "}
-            {t.quantity} qty
+            {dayLabel(t.tradeDate)} · {t.entryTime || DASH} → {t.exitTime || DASH}
+            {signedIn && <> · {t.quantity} qty</>}
           </div>
         </div>
         <div className="text-right flex flex-col gap-1">
-          {t.pnl === null ? (
-            <div className="text-[30px] font-medium tracking-[-0.015em] text-dim">open</div>
-          ) : (
+          {signedIn && t.pnl !== null && (
             <div className={`text-[30px] font-medium tracking-[-0.015em] ${pnlTone(t.pnl)}`}>
               {money(t.pnl)}
             </div>
           )}
+          {t.pnl === null && (
+            <div className="text-[30px] font-medium tracking-[-0.015em] text-dim">open</div>
+          )}
           <div className="text-[12.5px] text-dim">
-            risk {t.initialRisk === null ? DASH : plain(t.initialRisk)} · realised{" "}
-            {t.rr === null ? DASH : rLabel(t.rr)}
+            {signedIn && <>risk {t.initialRisk === null ? DASH : plain(t.initialRisk)} · </>}
+            realised {t.rr === null ? DASH : rLabel(t.rr)}
           </div>
         </div>
       </header>
@@ -240,7 +259,7 @@ export default function TradeDetailScreen() {
             </div>
           </div>
 
-          <TradeDetails tradeId={t.id} />
+          <TradeDetails scope={{ tradeId: t.id }} />
 
           <TradeScreenshots tradeId={t.id} />
         </div>
@@ -267,6 +286,28 @@ export default function TradeDetailScreen() {
             </span>
             {/* Without this a rejected write is invisible: the box keeps the typed value. */}
             {tradesError && <span className="text-[12px] text-loss">{tradesError}</span>}
+          </div>
+
+          {/* What kind of trade this was — the same vocabulary a basket uses */}
+          <div className="border border-line rounded-md bg-surface p-6 flex flex-col gap-4">
+            <span className="text-[14px] font-medium">Trade type</span>
+            <select
+              value={effectiveType(t)}
+              disabled={!signedIn}
+              onChange={(e) => setTradeType(t.id, e.target.value)}
+              className="w-full px-4 py-2 text-[13px] rounded-md border border-line-strong bg-bg text-ink focus:border-accent"
+            >
+              {TRADE_TYPES.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+            <span className="text-[11.5px] text-dim leading-[1.5]">
+              {t.tradeType
+                ? `Set by hand. The instrument alone says "${autoTypeOf(t)}".`
+                : "Derived from the instrument — nothing is stored until you change it."}
+            </span>
           </div>
 
           {/* Facts */}

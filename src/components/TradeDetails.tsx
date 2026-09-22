@@ -7,7 +7,7 @@
  * note is posted deliberately, so it writes on Add and commits on Save; a half-typed note is
  * never stored.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useJournal } from "../store";
 import {
   addDetail,
@@ -15,6 +15,7 @@ import {
   listDetails,
   removeDetail,
   saveIdea,
+  type DetailScope,
   type TradeDetail,
 } from "../lib/tradeDetails";
 import { STRATEGIES } from "../lib/strategies";
@@ -24,9 +25,21 @@ import { Divider, Eyebrow } from "./ui";
 /** Matches the journal's batching delay. */
 const SAVE_DELAY_MS = 500;
 
-export default function TradeDetails({ tradeId }: { tradeId: number }) {
+/**
+ * The same panel serves a leg and a basket; only the owner differs. `scope` is an object, so it
+ * is destructured into a primitive before it reaches any dependency array — a fresh object
+ * literal from the parent would otherwise re-run the load on every render.
+ */
+export default function TradeDetails({ scope }: { scope: DetailScope }) {
   const { session } = useJournal();
   const signedIn = Boolean(session);
+
+  const kind = "tradeId" in scope ? "t" : "g";
+  const ownerId = "tradeId" in scope ? scope.tradeId : scope.groupId;
+  const owner = useMemo<DetailScope>(
+    () => (kind === "t" ? { tradeId: ownerId } : { groupId: ownerId }),
+    [kind, ownerId]
+  );
 
   const [notes, setNotes] = useState<TradeDetail[]>([]);
   /** One row per strategy selected. The rows are the selection — there is no array anywhere. */
@@ -51,7 +64,7 @@ export default function TradeDetails({ tradeId }: { tradeId: number }) {
 
   const refresh = useCallback(async () => {
     try {
-      const rows = await listDetails(tradeId);
+      const rows = await listDetails(owner);
       const stored = rows.find((r) => r.kind === "idea") ?? null;
       setIdeaId(stored?.id ?? null);
       setIdea(stored?.body ?? "");
@@ -62,7 +75,7 @@ export default function TradeDetails({ tradeId }: { tradeId: number }) {
       setError(e instanceof Error ? e.message : String(e));
     }
     setLoading(false);
-  }, [tradeId]);
+  }, [owner]);
 
   useEffect(() => {
     void refresh();
@@ -86,14 +99,14 @@ export default function TradeDetails({ tradeId }: { tradeId: number }) {
       unsavedIdea.current = null;
       void (async () => {
         try {
-          setIdeaId(await saveIdea(tradeId, ideaId, body));
+          setIdeaId(await saveIdea(owner, ideaId, body));
           setError(null);
         } catch (e) {
           setError(e instanceof Error ? e.message : String(e));
         }
       })();
     },
-    [tradeId, ideaId]
+    [owner, ideaId]
   );
 
   flushRef.current = flushIdea;
@@ -120,7 +133,7 @@ export default function TradeDetails({ tradeId }: { tradeId: number }) {
     run(async () => {
       const body = draft.trim();
       if (!body) return;
-      const saved = await addDetail(tradeId, "note", body);
+      const saved = await addDetail(owner, "note", body);
       setNotes((prev) => [...prev, saved]);
       setDraft("");
     });
@@ -142,7 +155,7 @@ export default function TradeDetails({ tradeId }: { tradeId: number }) {
         await removeDetail(row.id);
         setStrategies((prev) => prev.filter((s) => s.id !== row.id));
       } else {
-        const saved = await addDetail(tradeId, "strategy", name);
+        const saved = await addDetail(owner, "strategy", name);
         setStrategies((prev) => [...prev, saved]);
       }
     });

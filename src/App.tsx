@@ -5,6 +5,7 @@ import SessionScreen from "./screens/SessionScreen";
 import TradesScreen from "./screens/TradesScreen";
 import TradeHistoryScreen from "./screens/TradeHistoryScreen";
 import TradeDetailScreen from "./screens/TradeDetailScreen";
+import GroupDetailScreen from "./screens/GroupDetailScreen";
 import ReviewScreen from "./screens/ReviewScreen";
 import PlaybookScreen from "./screens/PlaybookScreen";
 import CaptureScreen from "./screens/CaptureScreen";
@@ -46,6 +47,7 @@ function Shell() {
           <Route path="/trades" element={<TradesScreen />} />
           <Route path="/history" element={<TradeHistoryScreen />} />
           <Route path="/trades/:id" element={<TradeDetailScreen />} />
+          <Route path="/groups/:id" element={<GroupDetailScreen />} />
           <Route path="/review" element={<ReviewScreen />} />
           <Route path="/playbook" element={<PlaybookScreen />} />
           <Route path="/capture" element={<CaptureScreen />} />

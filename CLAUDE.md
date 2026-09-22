@@ -68,17 +68,50 @@ lives elsewhere, keyed on `trade_id`.
 | `trades` | instrument, prices, times, P&L, R:R | one row per entry lot |
 | `trade_details` | the idea, the notes, the strategies used | `kind = 'idea'` (at most one, partial unique index), `'note'` (any number, timestamped), or `'strategy'` (one row per strategy selected, no duplicates) |
 | `trade_screenshots` | one row per image; bytes in the private bucket | any number per trade |
+| `trade_groups` | a basket: several legs that were one decision | `trades.group_id` points at it; NULL means a trade on its own |
 
-`stop_price` is the only hand-entered column left on `trades`, because Postgres generates
-`initial_risk` and `rr` straight from it. It is excluded from `toInsert`, so a re-sync cannot
-overwrite it.
+**Three hand-entered columns on `trades`, and all three are excluded from `toInsert`.** That
+exclusion is the contract the whole sync rests on — anything added to that function is something
+a re-sync is allowed to overwrite:
+
+- `stop_price` — Postgres generates `initial_risk` and `rr` straight from it.
+- `group_id` — putting it in `toInsert` would silently ungroup every basket on the next sync,
+  and nowhere else. It is the most destructive single line this codebase could grow.
+- `trade_type` — an override. `''` means "derive it from the instrument", which is what
+  `effectiveType` in `src/lib/tradeTypes.ts` does, so nothing is stored until you change it.
+
+**A basket is one trade, everywhere.** `trade_groups` holds the name, the type, the direction
+and the hand-typed risk; the legs stay exactly as the broker reported them and are never merged
+or rewritten. Net P&L is summed in the app (`summarise` in `src/lib/tradeGroups.ts`) rather than
+in Postgres, because every leg is already loaded in `dbTrades` and a view would be a second
+source of truth for an addition. `buildRows` folds legs into baskets for the tables and `statsOf`
+counts a basket once — that is the entire point, since a hedge leg is *designed* to lose and
+counting it as its own losing trade is what made the win rate meaningless.
+
+Risk is the one number a basket cannot get from its legs: hedging means they offset, so summing
+per-leg stops overstates what was at risk. `trade_groups.risk_amount` is typed by hand and wins
+whenever it is set; the summed legs are only a fallback. `on delete set null` on `group_id` means
+deleting a basket ungroups its legs and can never delete broker fact.
+
+**Most trades are not baskets.** A lot with `group_id` NULL renders through the table's existing
+row markup untouched. Grouping is opt-in: `suggestBaskets` only ever proposes (and only for
+chains of ≥2 *different* contracts entered within five minutes, so a lone buy or a scale-in is
+never suggested), and nothing is created without an explicit click.
 
 **A multi-select is rows, not an array.** `strategies` was a `text[]` on `trades` and is now one
 `kind = 'strategy'` row per selection, so everything you enter by hand is in one table and
 `select trade_id from trade_details where kind = 'strategy' and body = 'KAR'` answers "every
 trade that used KAR". The names are plain text from the fixed list in `src/lib/strategies.ts`
 (there is no strategies table to point a foreign key at); that same list feeds the dashboard
-journal's single-select, so do not fork it. `SessionScreen.tsx` still links to `/trades/:id` with a *mock* trade
+journal's single-select, so do not fork it. `src/lib/tradeTypes.ts` is the same arrangement for
+trade types, shared by the journal, a basket and a single lot — one list, do not fork it either.
+
+**A `trade_details` row belongs to a trade or a basket, never both** (`DetailScope`, and the
+`trade_details_one_owner` check). A basket is one trade, so it gets one idea and one notes
+thread rather than the same text copied onto four legs. The partial unique indexes are
+duplicated per owner in `trade_details_groups.sql`, because a NULL `trade_id` does not collide
+in a unique index — left alone, the originals would have silently stopped constraining
+group-owned rows. `SessionScreen.tsx` still links to `/trades/:id` with a *mock* trade
 id, so those links land on the "not in the journal" fallback; that screen is unlinked from the
 sidebar and still entirely mock. These sit inside
 `Shell`; the sign-in route is matched first, outside it, so it renders without the sidebar. Layout is a fixed 212px sidebar grid
@@ -87,7 +120,8 @@ plus a `min-w-[1180px]` main column — this is a desktop-only design, not respo
 **The SQL files are a history, and order matters.** Run them in the SQL editor in the order
 listed at the top of each: `trades.sql` → `trades_lot_seq.sql` → `trade_notes.sql` →
 `trades_idea_strategies.sql` → `trade_screenshots.sql` → `trade_details.sql` →
-`trade_screenshots_table.sql`. The later files migrate the earlier shapes forward —
+`trade_screenshots_table.sql` → `trade_groups.sql` → `trade_details_groups.sql`.
+The later files migrate the earlier shapes forward —
 `trade_details.sql` absorbs `trade_notes` and `trades.idea` then drops both;
 `trade_screenshots_table.sql` adopts images already sitting in the bucket. Every migration block
 is guarded on the old thing still existing, so re-running a file is safe. The superseded files
@@ -153,6 +187,11 @@ Icons are Phosphor via a CDN stylesheet in `index.html`, used as `<i className="
 Shared primitives live in `src/components/ui.tsx` (`Divider`, `Eyebrow`, `PillGroup`,
 `FocusRating`, `Tag`, `Meter`). Screens are otherwise self-contained — markup is not
 over-extracted into components, so match that granularity.
+
+`TradesTable.tsx` is the one deliberate exception. `TradesScreen` and `TradeHistoryScreen` are
+twins over the same rows, and once the table grew selection, expansion and two kinds of row,
+keeping that correct in two copies stopped being realistic. Each screen still owns its own
+header, filters, status bar and empty state; only the table is shared.
 
 ## Phase 2 notes (from README)
 

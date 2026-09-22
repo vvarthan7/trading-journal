@@ -40,6 +40,47 @@ export interface TradeLot {
   /** hh:mm:ss, as the broker reports it. */
   entryTime: string;
   exitTime: string | null;
+
+  /** Option identity, straight off the entry fill. See `optionIdentity` below. */
+  underlying: string;
+  expiry: string | null;
+  strike: number | null;
+  optionType: string;
+  lotSize: number | null;
+}
+
+const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+
+/**
+ * SmartAPI's "30SEP2025" → "2025-09-30". Returns null for anything that does not parse, which
+ * includes the empty string equity fills carry.
+ */
+function expiryIso(raw: string): string | null {
+  const m = /^(\d{1,2})([A-Z]{3})(\d{4})$/.exec(raw.trim().toUpperCase());
+  if (!m) return null;
+  const month = MONTHS.indexOf(m[2]);
+  if (month < 0) return null;
+  return `${m[3]}-${String(month + 1).padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+}
+
+/**
+ * The five option fields the broker sends and the app used to discard, normalised.
+ *
+ * `strikeprice` is -1 on non-option fills and has been seen carrying paise rather than rupees,
+ * so it is floored at 0 and only trusted for rows that actually carry an option type. Everything
+ * here degrades to empty rather than throwing: a missing field costs a basket suggestion, and
+ * that is a far better outcome than a sync that fails.
+ */
+function optionIdentity(f: SmartApiFill) {
+  const optionType = (f.optiontype ?? "").trim().toUpperCase();
+  const strike = Number(f.strikeprice);
+  return {
+    underlying: (f.symbolgroup ?? "").trim().toUpperCase(),
+    expiry: expiryIso(f.expirydate ?? ""),
+    strike: optionType && Number.isFinite(strike) && strike > 0 ? strike : null,
+    optionType: optionType === "CE" || optionType === "PE" ? optionType : "",
+    lotSize: Number(f.marketlot) > 0 ? Number(f.marketlot) : null,
+  };
 }
 
 /** An entry fill with quantity still unmatched. */
@@ -94,6 +135,8 @@ export function toLots(fills: SmartApiFill[]): TradeLot[] {
         exitPrice: exit ? Number(exit.fillprice) || 0 : null,
         entryTime: entry.fill.filltime,
         exitTime: exit?.filltime ?? null,
+
+        ...optionIdentity(entry.fill),
       });
     };
 

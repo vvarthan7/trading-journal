@@ -1,8 +1,11 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useJournal } from "../store";
-import { longDay, money, plain, price, rLabel, shortDay, todayIso } from "../lib/format";
-import { PillGroup, WIN, LOSS } from "../components/ui";
+import { longDay, todayIso } from "../lib/format";
+import { buildRows } from "../lib/tradeGroups";
+import TradesTable from "../components/TradesTable";
+import BasketSuggestions from "../components/BasketSuggestions";
+import { PillGroup } from "../components/ui";
 
 type Filter = "all" | "winners" | "losers" | "open";
 
@@ -13,29 +16,28 @@ const FILTERS = [
   { value: "open" as const, label: "Open" },
 ];
 
-const COLS =
-  "grid-cols-[62px_minmax(0,1.2fr)_70px_52px_42px_78px_78px_54px_54px_84px_76px_56px_86px]";
-
-/** Shown wherever there is nothing yet — no exit, or no stop typed in. */
-const DASH = "—";
-
 export default function TradesScreen() {
   const {
     todayTrades,
+    tradeGroups,
     tradesLoading,
     tradesError,
     syncing,
     brokerConfigured,
     syncBrokerTrades,
-    setTradeStop,
     session,
   } = useJournal();
   const [filter, setFilter] = useState<Filter>("all");
 
-  const rows = todayTrades.filter((t) => {
-    if (filter === "winners") return (t.pnl ?? 0) > 0;
-    if (filter === "losers") return (t.pnl ?? 0) < 0;
-    if (filter === "open") return t.open;
+  /** Baskets fold their legs in before filtering, so a basket filters and counts as one trade. */
+  const all = useMemo(() => buildRows(todayTrades, tradeGroups), [todayTrades, tradeGroups]);
+
+  const rows = all.filter((row) => {
+    const pnl = row.kind === "lot" ? row.trade.pnl : row.summary.net;
+    const isOpen = row.kind === "lot" ? row.trade.open : row.summary.open;
+    if (filter === "winners") return (pnl ?? 0) > 0;
+    if (filter === "losers") return (pnl ?? 0) < 0;
+    if (filter === "open") return isOpen;
     return true;
   });
 
@@ -85,84 +87,10 @@ export default function TradesScreen() {
         </button>
       </div>
 
-      {/* Table */}
-      <div className="border border-line rounded-md overflow-hidden bg-surface">
-        <div
-          className={`grid ${COLS} gap-3 px-6 py-3 border-b border-line-strong text-[10.5px] tracking-[0.08em] uppercase text-dim`}
-        >
-          <span>Date</span>
-          <span>Instrument</span>
-          <span>Type</span>
-          <span>Qty</span>
-          <span>Lot</span>
-          <span>Entry</span>
-          <span>Exit</span>
-          <span>In</span>
-          <span>Out</span>
-          <span>Stop</span>
-          <span className="text-right">Risk</span>
-          <span className="text-right">R:R</span>
-          <span className="text-right">P&L</span>
-        </div>
+      {/* Legs from this session that look like they were one decision */}
+      <BasketSuggestions scope="today" />
 
-        {rows.map((t) => {
-          const pnlColor = (t.pnl ?? 0) >= 0 ? WIN : LOSS;
-          const rColor = (t.rr ?? 0) >= 0 ? WIN : LOSS;
-          return (
-            <div
-              key={t.id}
-              className={`grid ${COLS} gap-3 items-center px-6 py-[10px] border-b border-line-soft last:border-b-0 text-[12.5px] text-muted`}
-            >
-              <span>{shortDay(t.tradeDate)}</span>
-              <span className="flex flex-col gap-[1px] min-w-0">
-                <Link
-                  to={`/trades/${t.id}`}
-                  state={{ from: "/trades" }}
-                  className="text-ink font-medium text-[13px] truncate no-underline hover:text-accent-deep transition-colors"
-                >
-                  {t.instrument}
-                </Link>
-                <span className="text-[11px] text-dim">
-                  {t.exchange} · {t.direction}
-                </span>
-              </span>
-              <span className="text-dim">{t.type}</span>
-              <span>{t.quantity}</span>
-              <span>{t.lot ?? DASH}</span>
-              <span>{price(t.entryPrice)}</span>
-              <span>{t.exitPrice === null ? DASH : price(t.exitPrice)}</span>
-              <span>{t.entryTime || DASH}</span>
-              <span>{t.exitTime || DASH}</span>
-
-              {/* The one hand-entered field. Postgres derives Risk and R:R from it. */}
-              <input
-                type="number"
-                step="0.05"
-                inputMode="decimal"
-                value={t.stopPrice ?? ""}
-                placeholder={DASH}
-                onChange={(e) =>
-                  setTradeStop(t.id, e.target.value === "" ? null : Number(e.target.value))
-                }
-                className="w-full px-2 py-[3px] text-[12px] text-right rounded-sm border border-line-strong bg-transparent text-ink-2 focus:border-accent"
-              />
-
-              <span className="text-right">
-                {t.initialRisk === null ? DASH : plain(t.initialRisk)}
-              </span>
-              <span className="text-right" style={{ color: t.rr === null ? undefined : rColor }}>
-                {t.rr === null ? DASH : rLabel(t.rr)}
-              </span>
-              <span
-                className="text-right text-[13.5px] font-medium"
-                style={{ color: t.pnl === null ? undefined : pnlColor }}
-              >
-                {t.pnl === null ? <span className="text-dim">open</span> : money(t.pnl)}
-              </span>
-            </div>
-          );
-        })}
-      </div>
+      <TradesTable rows={rows} from="/trades" />
 
       {rows.length === 0 && !tradesLoading && (
         <div className="py-20 text-center text-[13.5px] text-dim">

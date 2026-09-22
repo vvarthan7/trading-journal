@@ -9,9 +9,8 @@ import {
   nextLevel,
 } from "../lib/format";
 import { STRATEGIES } from "../lib/strategies";
+import { TRADE_TYPES } from "../lib/tradeTypes";
 import { LOSS, WIN } from "./ui";
-
-const TRADE_TYPES = ["Options Selling", "Options Buying", "Index Futures", "Equity"];
 
 type FlagKey =
   | "rulesFollowed"
@@ -28,13 +27,28 @@ type FlagKey =
  * `head` is the column title with its line break; `label` is the one-line accessible name.
  */
 const FLAGS: { key: FlagKey; label: string; head: string; good: YesNo }[] = [
-  { key: "rulesFollowed", label: "Rules followed", head: "Rules\nfollowed", good: "yes" },
-  { key: "positionSizing", label: "Position sizing", head: "Position\nsizing", good: "yes" },
+  {
+    key: "rulesFollowed",
+    label: "Rules followed",
+    head: "Rules\nfollowed",
+    good: "yes",
+  },
+  {
+    key: "positionSizing",
+    label: "Position sizing",
+    head: "Position\nsizing",
+    good: "yes",
+  },
   { key: "fomo", label: "FOMO", head: "FOMO", good: "no" },
   { key: "revenge", label: "Revenge", head: "Revenge", good: "no" },
   { key: "earlyEntry", label: "Early entry", head: "Early\nentry", good: "no" },
   { key: "earlyExit", label: "Early exit", head: "Early\nexit", good: "no" },
-  { key: "overtrading", label: "Overtrading", head: "Over-\ntrading", good: "no" },
+  {
+    key: "overtrading",
+    label: "Overtrading",
+    head: "Over-\ntrading",
+    good: "no",
+  },
   { key: "wrongTrade", label: "Wrong trade", head: "Wrong\ntrade", good: "no" },
 ];
 
@@ -66,8 +80,11 @@ const GAP = 8;
 /** px-6 on each row: 2 × 16.8px */
 const ROW_PAD = 34;
 
-const TEMPLATE = COLS.map((c) => (c.fixed ? `${c.min}px` : `minmax(${c.min}px, ${c.min}fr)`)).join(" ");
-const MIN_WIDTH = COLS.reduce((sum, c) => sum + c.min, 0) + GAP * (COLS.length - 1) + ROW_PAD;
+const TEMPLATE = COLS.map((c) =>
+  c.fixed ? `${c.min}px` : `minmax(${c.min}px, ${c.min}fr)`,
+).join(" ");
+const MIN_WIDTH =
+  COLS.reduce((sum, c) => sum + c.min, 0) + GAP * (COLS.length - 1) + ROW_PAD;
 
 const GRID = { gridTemplateColumns: TEMPLATE, columnGap: GAP };
 
@@ -103,9 +120,14 @@ function Choice<T extends string>({
       aria-invalid={missing || undefined}
       required
       value={value ?? ""}
-      onChange={(e) => onChange(e.target.value === "" ? null : (e.target.value as T))}
+      onChange={(e) =>
+        onChange(e.target.value === "" ? null : (e.target.value as T))
+      }
       className={`${field(missing)} cursor-pointer`}
-      style={{ color: value && tone ? tone(value) : value ? undefined : "var(--color-dim)" }}
+      style={{
+        color:
+          value && tone ? tone(value) : value ? undefined : "var(--color-dim)",
+      }}
     >
       <option value="">—</option>
       {options.map((o) => (
@@ -134,10 +156,13 @@ export default function TradeJournal() {
   } = useJournal();
   const canEdit = session !== null;
 
-  const set = (id: number, patch: Partial<JournalEntry>) => updateJournalEntry(id, patch);
+  const set = (id: number, patch: Partial<JournalEntry>) =>
+    updateJournalEntry(id, patch);
 
   /** Per-row empty required fields; only flagged for the owner, who can fill them. */
-  const missing = journal.map((e) => (canEdit ? missingFields(e) : new Set<keyof JournalEntry>()));
+  const missing = journal.map((e) =>
+    canEdit ? missingFields(e) : new Set<keyof JournalEntry>(),
+  );
   /** 1-based numbers of rows that still have an empty field. */
   const incomplete = missing.flatMap((m, i) => (m.size > 0 ? [i + 1] : []));
 
@@ -228,7 +253,9 @@ export default function TradeJournal() {
                 required
                 placeholder="NIFTY"
                 value={e.instrument}
-                onChange={(ev) => set(e.id, { instrument: ev.target.value.toUpperCase() })}
+                onChange={(ev) =>
+                  set(e.id, { instrument: ev.target.value.toUpperCase() })
+                }
                 className={`${field(missing[i].has("instrument"))} placeholder:text-dim/60`}
               />
 
@@ -299,7 +326,11 @@ export default function TradeJournal() {
                   type="button"
                   aria-label={`Remove row ${i + 1}`}
                   onClick={() => {
-                    if (window.confirm(`Delete row ${i + 1}? This can't be undone.`)) {
+                    if (
+                      window.confirm(
+                        `Delete row ${i + 1}? This can't be undone.`,
+                      )
+                    ) {
                       void removeJournalEntry(e.id);
                     }
                   }}
@@ -339,7 +370,9 @@ export default function TradeJournal() {
             </span>
           ) : (
             levelBlock && (
-              <span className="ml-auto px-6 text-[11.5px] text-warn">{levelBlock}</span>
+              <span className="ml-auto px-6 text-[11.5px] text-warn">
+                {levelBlock}
+              </span>
             )
           )}
         </div>

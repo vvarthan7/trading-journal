@@ -1,14 +1,17 @@
 /**
  * Everything hand-entered about a trade — the idea, the notes and the strategies used — from
- * `public.trade_details`. See `supabase/trade_details.sql` and `trade_details_strategies.sql`.
+ * `public.trade_details`. See `supabase/trade_details.sql`, `trade_details_strategies.sql` and
+ * `trade_details_groups.sql`.
  *
  * All three are rows in one table separated by `kind`; the only difference is how many there
- * may be. A trade has at most one 'idea' (a partial unique index enforces it), any number of
+ * may be. An owner has at most one 'idea' (a partial unique index enforces it), any number of
  * 'note' rows, and one 'strategy' row per strategy selected — a multi-select is rows, not an
  * array. Facts about the trade — instrument, entry price, quantity, P&L — stay in `trades` and
  * reach the screen through `dbTrades`.
  *
- * Scoped to one trade and read only on its detail screen, so unlike `trades` and
+ * The owner is a trade or a basket, never both (see `DetailScope`).
+ *
+ * Scoped to one owner and read only on its detail screen, so unlike `trades` and
  * `journal_entries` this does not live in the store: loading every note for every trade at boot
  * would be work nothing asks for.
  */
@@ -19,10 +22,27 @@ const NOT_SAVED = "Not saved — are you still signed in?";
 
 export type DetailKind = "idea" | "note" | "strategy";
 
+/**
+ * Who the writing belongs to: one leg, or a whole basket. Exactly one, which is what the
+ * `trade_details_one_owner` check enforces in Postgres.
+ *
+ * A basket is one trade, so it gets one idea and one notes thread rather than the same text
+ * repeated on four legs — and tagging it with a strategy tags the trade, not the hedge.
+ */
+export type DetailScope = { tradeId: number } | { groupId: number };
+
+/** The owner column and its value, as both the filter and the insert need them. */
+function owner(scope: DetailScope): { column: "trade_id" | "group_id"; id: number } {
+  return "tradeId" in scope
+    ? { column: "trade_id", id: scope.tradeId }
+    : { column: "group_id", id: scope.groupId };
+}
+
 /** A `trade_details` row as Supabase returns it. */
 interface TradeDetailRow {
   id: number;
-  trade_id: number;
+  trade_id: number | null;
+  group_id: number | null;
   kind: DetailKind;
   body: string;
   created_at: string;
@@ -49,12 +69,13 @@ function fromRow(r: TradeDetailRow): TradeDetail {
   };
 }
 
-/** Everything on a trade, oldest first. One read serves both panels and the chips. */
-export async function listDetails(tradeId: number): Promise<TradeDetail[]> {
+/** Everything on one trade or basket, oldest first. One read serves both panels and the chips. */
+export async function listDetails(scope: DetailScope): Promise<TradeDetail[]> {
+  const { column, id } = owner(scope);
   const { data, error } = await supabase
     .from("trade_details")
     .select("*")
-    .eq("trade_id", tradeId)
+    .eq(column, id)
     .order("created_at", { ascending: true });
   if (error) throw new Error(error.message);
   return (data as TradeDetailRow[]).map(fromRow);
@@ -62,13 +83,14 @@ export async function listDetails(tradeId: number): Promise<TradeDetail[]> {
 
 /** Returns the stored row, so the caller can show it without a second read. */
 export async function addDetail(
-  tradeId: number,
+  scope: DetailScope,
   kind: DetailKind,
   body: string
 ): Promise<TradeDetail> {
+  const { column, id } = owner(scope);
   const { data, error } = await supabase
     .from("trade_details")
-    .insert({ trade_id: tradeId, kind, body: body.trim() })
+    .insert({ [column]: id, kind, body: body.trim() })
     .select()
     .single();
   if (error) throw new Error(error.message);
@@ -102,7 +124,7 @@ export async function removeDetail(id: number): Promise<void> {
  * (`where kind = 'idea'`), and PostgREST's on-conflict cannot name an index predicate.
  */
 export async function saveIdea(
-  tradeId: number,
+  scope: DetailScope,
   existingId: number | null,
   body: string
 ): Promise<number | null> {
@@ -111,7 +133,7 @@ export async function saveIdea(
     if (existingId !== null) await removeDetail(existingId);
     return null;
   }
-  if (existingId === null) return (await addDetail(tradeId, "idea", text)).id;
+  if (existingId === null) return (await addDetail(scope, "idea", text)).id;
   await editDetail(existingId, text);
   return existingId;
 }

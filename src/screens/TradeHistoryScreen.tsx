@@ -8,7 +8,10 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useJournal } from "../store";
-import { money, plain, price, rLabel, shortDay } from "../lib/format";
+import { money } from "../lib/format";
+import { buildRows, statsOf } from "../lib/tradeGroups";
+import TradesTable from "../components/TradesTable";
+import BasketSuggestions from "../components/BasketSuggestions";
 import { PillGroup, WIN, LOSS } from "../components/ui";
 
 type Filter = "all" | "winners" | "losers" | "open";
@@ -20,10 +23,7 @@ const FILTERS = [
   { value: "open" as const, label: "Open" },
 ];
 
-const COLS =
-  "grid-cols-[62px_minmax(0,1.2fr)_70px_52px_42px_78px_78px_54px_54px_84px_76px_56px_86px]";
-
-/** Shown wherever there is nothing yet — no exit, or no stop typed in. */
+/** Shown wherever there is nothing yet — here, a win rate with nothing closed to compute it. */
 const DASH = "—";
 
 /** The month pill's value for "no month filter". */
@@ -42,7 +42,7 @@ function monthLabel(ym: string): string {
 }
 
 export default function TradeHistoryScreen() {
-  const { dbTrades, tradesLoading, tradesError, reloadTrades, setTradeStop } = useJournal();
+  const { dbTrades, tradeGroups, tradesLoading, tradesError, reloadTrades } = useJournal();
   const [filter, setFilter] = useState<Filter>("all");
   const [month, setMonth] = useState<string>(ALL_MONTHS);
   const [query, setQuery] = useState("");
@@ -53,29 +53,42 @@ export default function TradeHistoryScreen() {
     return [...seen].sort().reverse();
   }, [dbTrades]);
 
+  /** Baskets fold their legs in before anything is filtered, so a basket filters as one trade. */
+  const all = useMemo(() => buildRows(dbTrades, tradeGroups), [dbTrades, tradeGroups]);
+
   const rows = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return dbTrades.filter((t) => {
-      if (month !== ALL_MONTHS && monthOf(t.tradeDate) !== month) return false;
-      if (needle && !t.instrument.toLowerCase().includes(needle)) return false;
-      if (filter === "winners") return (t.pnl ?? 0) > 0;
-      if (filter === "losers") return (t.pnl ?? 0) < 0;
-      if (filter === "open") return t.open;
+    return all.filter((row) => {
+      const date = row.kind === "lot" ? row.trade.tradeDate : row.summary.tradeDate;
+      if (month !== ALL_MONTHS && monthOf(date) !== month) return false;
+
+      if (needle) {
+        // A basket matches on its own name or on any leg's instrument.
+        const hay =
+          row.kind === "lot"
+            ? row.trade.instrument
+            : [row.group.name, ...row.summary.legs.map((l) => l.instrument)].join(" ");
+        if (!hay.toLowerCase().includes(needle)) return false;
+      }
+
+      const pnl = row.kind === "lot" ? row.trade.pnl : row.summary.net;
+      const isOpen = row.kind === "lot" ? row.trade.open : row.summary.open;
+      if (filter === "winners") return (pnl ?? 0) > 0;
+      if (filter === "losers") return (pnl ?? 0) < 0;
+      if (filter === "open") return isOpen;
       return true;
     });
-  }, [dbTrades, filter, month, query]);
+  }, [all, filter, month, query]);
 
-  /** Totals for what is on screen, not for the whole table. */
-  const net = rows.reduce((a, t) => a + (t.pnl ?? 0), 0);
-  const closed = rows.filter((t) => t.pnl !== null);
-  const wins = closed.filter((t) => (t.pnl ?? 0) > 0).length;
-  const winRate = closed.length === 0 ? null : Math.round((wins / closed.length) * 100);
+  /** Totals for what is on screen, not for the whole table. A basket counts once. */
+  const { net, closed, winRate } = statsOf(rows);
+  const total = statsOf(all);
 
   const status = tradesLoading
     ? "Loading stored trades…"
     : tradesError
       ? tradesError
-      : `${dbTrades.length} ${dbTrades.length === 1 ? "lot" : "lots"} in the journal`;
+      : `${total.trades} ${total.trades === 1 ? "trade" : "trades"} · ${total.lots} ${total.lots === 1 ? "lot" : "lots"} in the journal`;
 
   return (
     <div className="p-8 pb-20 flex flex-col gap-6">
@@ -111,7 +124,7 @@ export default function TradeHistoryScreen() {
             </span>
           </span>
           <span className="text-dim">
-            Win rate {winRate === null ? DASH : `${winRate}%`} · {closed.length} closed
+            Win rate {winRate === null ? DASH : `${winRate}%`} · {closed} closed
           </span>
           <button
             type="button"
@@ -151,84 +164,10 @@ export default function TradeHistoryScreen() {
         />
       </div>
 
-      {/* Table */}
-      <div className="border border-line rounded-md overflow-hidden bg-surface">
-        <div
-          className={`grid ${COLS} gap-3 px-6 py-3 border-b border-line-strong text-[10.5px] tracking-[0.08em] uppercase text-dim`}
-        >
-          <span>Date</span>
-          <span>Instrument</span>
-          <span>Type</span>
-          <span>Qty</span>
-          <span>Lot</span>
-          <span>Entry</span>
-          <span>Exit</span>
-          <span>In</span>
-          <span>Out</span>
-          <span>Stop</span>
-          <span className="text-right">Risk</span>
-          <span className="text-right">R:R</span>
-          <span className="text-right">P&L</span>
-        </div>
+      {/* Baskets worth making out of what is already stored */}
+      <BasketSuggestions scope="all" />
 
-        {rows.map((t) => {
-          const pnlColor = (t.pnl ?? 0) >= 0 ? WIN : LOSS;
-          const rColor = (t.rr ?? 0) >= 0 ? WIN : LOSS;
-          return (
-            <div
-              key={t.id}
-              className={`grid ${COLS} gap-3 items-center px-6 py-[10px] border-b border-line-soft last:border-b-0 text-[12.5px] text-muted`}
-            >
-              <span>{shortDay(t.tradeDate)}</span>
-              <span className="flex flex-col gap-[1px] min-w-0">
-                <Link
-                  to={`/trades/${t.id}`}
-                  state={{ from: "/history" }}
-                  className="text-ink font-medium text-[13px] truncate no-underline hover:text-accent-deep transition-colors"
-                >
-                  {t.instrument}
-                </Link>
-                <span className="text-[11px] text-dim">
-                  {t.exchange} · {t.direction}
-                </span>
-              </span>
-              <span className="text-dim">{t.type}</span>
-              <span>{t.quantity}</span>
-              <span>{t.lot ?? DASH}</span>
-              <span>{price(t.entryPrice)}</span>
-              <span>{t.exitPrice === null ? DASH : price(t.exitPrice)}</span>
-              <span>{t.entryTime || DASH}</span>
-              <span>{t.exitTime || DASH}</span>
-
-              {/* The one hand-entered field. Postgres derives Risk and R:R from it. */}
-              <input
-                type="number"
-                step="0.05"
-                inputMode="decimal"
-                value={t.stopPrice ?? ""}
-                placeholder={DASH}
-                onChange={(e) =>
-                  setTradeStop(t.id, e.target.value === "" ? null : Number(e.target.value))
-                }
-                className="w-full px-2 py-[3px] text-[12px] text-right rounded-sm border border-line-strong bg-transparent text-ink-2 focus:border-accent"
-              />
-
-              <span className="text-right">
-                {t.initialRisk === null ? DASH : plain(t.initialRisk)}
-              </span>
-              <span className="text-right" style={{ color: t.rr === null ? undefined : rColor }}>
-                {t.rr === null ? DASH : rLabel(t.rr)}
-              </span>
-              <span
-                className="text-right text-[13.5px] font-medium"
-                style={{ color: t.pnl === null ? undefined : pnlColor }}
-              >
-                {t.pnl === null ? <span className="text-dim">open</span> : money(t.pnl)}
-              </span>
-            </div>
-          );
-        })}
-      </div>
+      <TradesTable rows={rows} from="/history" />
 
       {rows.length === 0 && !tradesLoading && (
         <div className="py-20 text-center text-[13.5px] text-dim">
