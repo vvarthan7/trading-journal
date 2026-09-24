@@ -48,7 +48,7 @@ curl http://127.0.0.1:8000/api/health
 | Route | Purpose |
 | --- | --- |
 | `GET /api/health` | Readiness and which origins are allowed. No auth. |
-| `GET /api/trades` | Today's SmartAPI fills. Requires `Authorization: Bearer <supabase access token>`. |
+| `GET /api/trades` | Today's SmartAPI fills, plus `charges` — brokerage and total charges per order ID from SmartAPI's charges estimator (`null`, with `charges_error` set, if that call fails). Requires `Authorization: Bearer <supabase access token>`. |
 
 `/api/trades` verifies the token by asking Supabase who it belongs to, so a stranger who finds
 the URL cannot read your trade book. Set `ALLOWED_USER_ID` to lock it to one account.

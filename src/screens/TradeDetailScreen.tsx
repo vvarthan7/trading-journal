@@ -148,6 +148,24 @@ export default function TradeDetailScreen() {
       color: returnPct === null ? "var(--color-muted)" : returnPct >= 0 ? WIN : LOSS,
     },
     {
+      k: "Brokerage",
+      v: t.brokerage === null ? DASH : plain(t.brokerage),
+      color: "var(--color-muted)",
+      owner: true,
+    },
+    {
+      k: "Taxes & fees",
+      v: t.txnCharges === null ? DASH : plain(t.txnCharges),
+      color: "var(--color-muted)",
+      owner: true,
+    },
+    {
+      k: "Net P&L",
+      v: t.netPnl === null ? DASH : money(t.netPnl),
+      color: t.netPnl === null ? "var(--color-muted)" : t.netPnl >= 0 ? WIN : LOSS,
+      owner: true,
+    },
+    {
       k: "Risk per unit",
       v: riskPerUnit === null ? DASH : price(riskPerUnit),
       color: "var(--color-muted)",
@@ -225,6 +243,7 @@ export default function TradeDetailScreen() {
             <div className="text-[30px] font-medium tracking-[-0.015em] text-dim">open</div>
           )}
           <div className="text-[12.5px] text-dim">
+            {signedIn && t.netPnl !== null && <>net {money(t.netPnl)} · </>}
             {signedIn && <>risk {t.initialRisk === null ? DASH : plain(t.initialRisk)} · </>}
             realised {t.rr === null ? DASH : rLabel(t.rr)}
           </div>

@@ -80,6 +80,17 @@ a re-sync is allowed to overwrite:
 - `trade_type` — an override. `''` means "derive it from the instrument", which is what
   `effectiveType` in `src/lib/tradeTypes.ts` does, so nothing is stored until you change it.
 
+**Charges are captured at sync, or never.** History cannot ask the broker for anything, so
+`/api/trades` also returns each order's brokerage and total charges from SmartAPI's
+`estimateCharges` (fills are folded back into orders first — brokerage is per order, not per
+fill — and the order book supplies the instrument token the trade book lacks). `toLots` splits
+each order's charges onto the lots it touched, pro rata by quantity, into `trades.brokerage` and
+`trades.txn_charges`; Postgres generates `net_pnl` from them. They are broker fact, so they are in
+`toInsert` — but only when known, and the store upserts priced and unpriced lots in separate
+batches, because an upsert nulls any column one row in the batch omits. `pnl` stays gross; win
+rate and the Winners/Losers filters still use it. Rows synced before `trade_charges.sql` have
+NULL charges and nothing to backfill them from.
+
 **A basket is one trade, everywhere.** `trade_groups` holds the name, the type, the direction
 and the hand-typed risk; the legs stay exactly as the broker reported them and are never merged
 or rewritten. Net P&L is summed in the app (`summarise` in `src/lib/tradeGroups.ts`) rather than
@@ -92,6 +103,13 @@ Risk is the one number a basket cannot get from its legs: hedging means they off
 per-leg stops overstates what was at risk. `trade_groups.risk_amount` is typed by hand and wins
 whenever it is set; the summed legs are only a fallback. `on delete set null` on `group_id` means
 deleting a basket ungroups its legs and can never delete broker fact.
+
+**A position is one row too, but only on screen.** Scaling in, a partially filled order or a
+staggered exit splits one position into several lots. `buildRows` folds ungrouped lots of the
+same date, exchange, instrument and direction whose holding periods overlap (flat back to flat)
+into a `position` row: weighted-average prices, summed P&L, and a stop that writes to every lot.
+Nothing is stored for it — the lots stay exactly as synced — and it counts once in `statsOf`.
+A lot that is its whole position still renders as a plain `lot` row.
 
 **Most trades are not baskets.** A lot with `group_id` NULL renders through the table's existing
 row markup untouched. Grouping is opt-in: `suggestBaskets` only ever proposes (and only for
@@ -120,7 +138,8 @@ plus a `min-w-[1180px]` main column — this is a desktop-only design, not respo
 **The SQL files are a history, and order matters.** Run them in the SQL editor in the order
 listed at the top of each: `trades.sql` → `trades_lot_seq.sql` → `trade_notes.sql` →
 `trades_idea_strategies.sql` → `trade_screenshots.sql` → `trade_details.sql` →
-`trade_screenshots_table.sql` → `trade_groups.sql` → `trade_details_groups.sql`.
+`trade_screenshots_table.sql` → `trade_groups.sql` → `trade_details_groups.sql` →
+`trade_charges.sql`.
 The later files migrate the earlier shapes forward —
 `trade_details.sql` absorbs `trade_notes` and `trades.idea` then drops both;
 `trade_screenshots_table.sql` adopts images already sitting in the bucket. Every migration block

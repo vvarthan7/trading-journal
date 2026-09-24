@@ -13,7 +13,9 @@ This does not run on GitHub Pages. Pages serves static files only. Deploy this t
 runs Python (Render, Railway, Fly.io, a VPS) and point the frontend at it with VITE_API_BASE.
 
 Trade grouping deliberately stays in the frontend (src/lib/tradeLots.ts), which is already
-tested. This service is a thin credential holder: it logs in, fetches, and returns raw fills.
+tested. This service is a thin credential holder: it logs in, fetches, and returns raw fills
+alongside each order's charges from SmartAPI's estimator (splitting those onto lots is also the
+frontend's job, since only it knows the lots).
 """
 
 from __future__ import annotations
@@ -34,6 +36,11 @@ load_dotenv()
 SMARTAPI_ROOT = "https://apiconnect.angelone.in"
 LOGIN_PATH = "/rest/auth/angelbroking/user/v1/loginByPassword"
 TRADE_BOOK_PATH = "/rest/secure/angelbroking/order/v1/getTradeBook"
+ORDER_BOOK_PATH = "/rest/secure/angelbroking/order/v1/getOrderBook"
+CHARGES_PATH = "/rest/secure/angelbroking/brokerage/v1/estimateCharges"
+
+# Orders per estimateCharges call. SmartAPI does not document a ceiling, so stay modest.
+CHARGES_BATCH = 25
 
 SMARTAPI_KEY = os.getenv("SMARTAPI_KEY", "")
 SMARTAPI_CLIENT_CODE = os.getenv("SMARTAPI_CLIENT_CODE", "")
@@ -169,13 +176,119 @@ def health() -> dict[str, Any]:
     }
 
 
+def _smartapi(method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """One authenticated SmartAPI call, retried once on a fresh session if the token expired."""
+
+    def call(token: str) -> dict[str, Any]:
+        res = httpx.request(
+            method,
+            SMARTAPI_ROOT + path,
+            json=payload,
+            headers={**_smartapi_headers(), "Authorization": f"Bearer {token}"},
+            timeout=20,
+        )
+        return res.json()
+
+    body = call(_session_token())
+    if not body.get("status") and _is_auth_error(str(body.get("errorcode", ""))):
+        body = call(_session_token(force_new=True))
+    return body
+
+
+def _brokerage_of(breakup: list[dict[str, Any]]) -> float:
+    """The broker's own fee, as opposed to exchange charges, STT, stamp duty, SEBI fees and GST."""
+    return sum(
+        float(item.get("amount") or 0)
+        for item in breakup
+        if "brokerage" in str(item.get("name", "")).lower()
+    )
+
+
+def _order_charges(fills: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
+    """
+    Charges per order ID, from SmartAPI's charges estimator.
+
+    Brokerage is levied per executed *order*, not per fill, so fills are folded back into their
+    order first — asking about each fill separately would charge the flat fee once per partial
+    fill. The estimator needs the instrument token, which the trade book does not carry, so it is
+    looked up in the order book.
+
+    Raises on anything unexpected; the caller turns that into a warning rather than a failed sync.
+    """
+    book = _smartapi("GET", ORDER_BOOK_PATH)
+    if not book.get("status"):
+        raise RuntimeError(book.get("message") or "order book unavailable")
+    tokens = {str(o.get("orderid")): str(o.get("symboltoken") or "") for o in book.get("data") or []}
+
+    orders: dict[str, dict[str, Any]] = {}
+    for f in fills:
+        oid = str(f.get("orderid", ""))
+        qty = float(f.get("fillsize") or 0)
+        o = orders.setdefault(
+            oid,
+            {
+                "product_type": f.get("producttype", ""),
+                "transaction_type": f.get("transactiontype", ""),
+                "exchange": f.get("exchange", ""),
+                "symbol_name": f.get("tradingsymbol", ""),
+                "token": tokens.get(oid, ""),
+                "qty": 0.0,
+                "value": 0.0,
+            },
+        )
+        o["qty"] += qty
+        o["value"] += qty * float(f.get("fillprice") or 0)
+
+    # Without a token the estimate would be for the wrong instrument, or refused outright.
+    priced = [(oid, o) for oid, o in orders.items() if o["token"] and o["qty"] > 0]
+
+    out: dict[str, dict[str, float]] = {}
+    for i in range(0, len(priced), CHARGES_BATCH):
+        batch = priced[i : i + CHARGES_BATCH]
+        body = _smartapi(
+            "POST",
+            CHARGES_PATH,
+            {
+                "orders": [
+                    {
+                        "product_type": o["product_type"],
+                        "transaction_type": o["transaction_type"],
+                        "quantity": str(int(o["qty"])),
+                        "price": f"{o['value'] / o['qty']:.4f}",
+                        "exchange": o["exchange"],
+                        "symbol_name": o["symbol_name"],
+                        "token": o["token"],
+                    }
+                    for _, o in batch
+                ]
+            },
+        )
+        if not body.get("status"):
+            raise RuntimeError(body.get("message") or "charges estimate refused")
+        per_order = (body.get("data") or {}).get("charges") or []
+        # The estimator answers in request order. If the counts disagree, nothing can be matched
+        # to an order safely, and a wrong charge is worse than a missing one.
+        if len(per_order) != len(batch):
+            raise RuntimeError("charges estimate did not return one entry per order")
+        for (oid, _), c in zip(batch, per_order):
+            breakup = c.get("breakup") or []
+            total = c.get("total_charges")
+            total = float(total) if total is not None else sum(float(b.get("amount") or 0) for b in breakup)
+            out[oid] = {"brokerage": round(_brokerage_of(breakup), 4), "total": round(total, 4)}
+    return out
+
+
 @app.get("/api/trades")
 def trades(authorization: str | None = Header(default=None)) -> dict[str, Any]:
     """
-    Today's fills, exactly as SmartAPI returns them. The frontend does the FIFO lot matching.
+    Today's fills, exactly as SmartAPI returns them, plus each order's brokerage and charges.
+    The frontend does the FIFO lot matching and splits the charges onto lots.
 
     SmartAPI has no historical trade endpoint, so this is the current session only and an empty
     list outside market hours is the correct answer, not an error.
+
+    Charges are best effort: if the estimator fails, `charges` is null and `charges_error` says
+    why, and the fills still come back — a sync must never fail over a fee.
     """
     _require_user(authorization)
 
@@ -186,22 +299,24 @@ def trades(authorization: str | None = Header(default=None)) -> dict[str, Any]:
             "SMARTAPI_MPIN and SMARTAPI_TOTP_SECRET in the backend environment",
         )
 
-    def call(token: str) -> dict[str, Any]:
-        res = httpx.get(
-            SMARTAPI_ROOT + TRADE_BOOK_PATH,
-            headers={**_smartapi_headers(), "Authorization": f"Bearer {token}"},
-            timeout=20,
-        )
-        return res.json()
-
     try:
-        body = call(_session_token())
-        if not body.get("status") and _is_auth_error(str(body.get("errorcode", ""))):
-            body = call(_session_token(force_new=True))
+        body = _smartapi("GET", TRADE_BOOK_PATH)
     except (httpx.HTTPError, ValueError) as exc:
         raise HTTPException(502, f"SmartAPI trade book failed: {exc}") from exc
 
     if not body.get("status"):
         raise HTTPException(502, body.get("message") or "SmartAPI returned an error")
 
-    return {"fills": body.get("data") or []}
+    fills: list[dict[str, Any]] = body.get("data") or []
+
+    charges: dict[str, dict[str, float]] | None = None
+    charges_error: str | None = None
+    if fills:
+        try:
+            charges = _order_charges(fills)
+        except HTTPException as exc:
+            charges_error = f"Charges unavailable: {exc.detail}"
+        except (httpx.HTTPError, ValueError, RuntimeError, TypeError, KeyError) as exc:
+            charges_error = f"Charges unavailable: {exc}"
+
+    return {"fills": fills, "charges": charges, "charges_error": charges_error}

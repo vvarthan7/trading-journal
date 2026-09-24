@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useJournal } from "../store";
 import { longDay, todayIso } from "../lib/format";
-import { buildRows } from "../lib/tradeGroups";
+import { buildRows, rowOpen, rowPnl } from "../lib/tradeGroups";
 import TradesTable from "../components/TradesTable";
 import BasketSuggestions from "../components/BasketSuggestions";
 import { PillGroup } from "../components/ui";
@@ -29,12 +29,12 @@ export default function TradesScreen() {
   } = useJournal();
   const [filter, setFilter] = useState<Filter>("all");
 
-  /** Baskets fold their legs in before filtering, so a basket filters and counts as one trade. */
+  /** Baskets and positions fold their lots in before filtering, so each filters as one trade. */
   const all = useMemo(() => buildRows(todayTrades, tradeGroups), [todayTrades, tradeGroups]);
 
   const rows = all.filter((row) => {
-    const pnl = row.kind === "lot" ? row.trade.pnl : row.summary.net;
-    const isOpen = row.kind === "lot" ? row.trade.open : row.summary.open;
+    const pnl = rowPnl(row);
+    const isOpen = rowOpen(row);
     if (filter === "winners") return (pnl ?? 0) > 0;
     if (filter === "losers") return (pnl ?? 0) < 0;
     if (filter === "open") return isOpen;
@@ -60,7 +60,7 @@ export default function TradesScreen() {
             Trades
           </h1>
           <div className="text-[13px] text-muted">
-            {longDay(todayIso())} · {rows.length} shown · one row per entry lot
+            {longDay(todayIso())} · {rows.length} shown · one row per position
           </div>
         </div>
         <div className="flex items-center gap-4">

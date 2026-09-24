@@ -34,6 +34,20 @@ export interface SmartApiFill {
   filltime: string;
 }
 
+/** One order's costs from SmartAPI's charges estimator. `total` includes `brokerage`. */
+export interface OrderCharges {
+  brokerage: number;
+  total: number;
+}
+
+export interface TradeBook {
+  fills: SmartApiFill[];
+  /** Keyed on order ID. Null when the estimator failed — the fills are still good. */
+  charges: Record<string, OrderCharges> | null;
+  /** Why `charges` is null, to show beside a sync that otherwise worked. */
+  chargesError: string | null;
+}
+
 /** Whether a backend URL is known. False in a deployed build with no VITE_API_BASE set. */
 export function brokerConfigured(): boolean {
   return Boolean(API_BASE);
@@ -54,10 +68,11 @@ async function readJson(res: Response): Promise<Record<string, unknown>> {
 }
 
 /**
- * Today's fills. SmartAPI has no historical trade endpoint, so this is the current session only
- * and an empty list outside market hours is the correct answer, not an error.
+ * Today's fills and their orders' charges. SmartAPI has no historical trade endpoint, so this is
+ * the current session only and an empty list outside market hours is the correct answer, not an
+ * error.
  */
-export async function fetchTradeBook(): Promise<SmartApiFill[]> {
+export async function fetchTradeBook(): Promise<TradeBook> {
   if (!API_BASE) {
     throw new Error("No backend URL — set VITE_API_BASE to your deployed FastAPI service.");
   }
@@ -79,5 +94,9 @@ export async function fetchTradeBook(): Promise<SmartApiFill[]> {
   if (!res.ok) {
     throw new Error(typeof body.detail === "string" ? body.detail : `Proxy error ${res.status}`);
   }
-  return (body.fills as SmartApiFill[] | undefined) ?? [];
+  return {
+    fills: (body.fills as SmartApiFill[] | undefined) ?? [],
+    charges: (body.charges as Record<string, OrderCharges> | null | undefined) ?? null,
+    chargesError: typeof body.charges_error === "string" ? body.charges_error : null,
+  };
 }

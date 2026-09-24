@@ -6,15 +6,16 @@
  * grouping gave it selection, expansion and two kinds of row, and that is too much intricate
  * behaviour to keep correct in two copies.
  *
- * A lot in no basket renders exactly as it always did. With no baskets created, this is the
- * table that was here before.
+ * A lot in no basket renders exactly as it always did, unless it is one of several lots that
+ * together make one position — those fold into a single expandable row.
  */
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useJournal } from "../store";
 import { money, plain, price, rLabel, shortDay } from "../lib/format";
 import type { DbTrade } from "../lib/tradeRows";
-import type { GroupDirection, TableRow } from "../lib/tradeGroups";
+import { chargesOf } from "../lib/tradeGroups";
+import type { GroupDirection, PositionSummary, TableRow } from "../lib/tradeGroups";
 import { classify, nameFor } from "../lib/basketSuggest";
 import { TRADE_TYPES, effectiveType, shortType } from "../lib/tradeTypes";
 import { WIN, LOSS } from "./ui";
@@ -24,16 +25,23 @@ const DASH = "—";
 
 /** A leading 26px for the chevron or tick, and a wider Type column for the trade type. */
 const COLS =
-  "grid-cols-[26px_62px_minmax(0,1.2fr)_92px_52px_42px_78px_78px_54px_54px_84px_76px_56px_86px]";
+  "grid-cols-[26px_62px_minmax(0,1.2fr)_92px_52px_42px_78px_78px_54px_54px_84px_76px_56px_66px_86px]";
 
 const DIRECTIONS: GroupDirection[] = ["long", "short", "neutral"];
 
 const ROW = "grid gap-3 items-center px-6 py-[10px] border-b border-line-soft last:border-b-0";
 
+/**
+ * Baskets and positions wrap their row and its expanded lots in a div. Collapsed, the row is that
+ * div's last child and loses its border to `last:`, so the wrapper carries the separator instead.
+ */
+const WRAP = "border-b border-line-soft last:border-b-0";
+
 export default function TradesTable({ rows, from }: { rows: TableRow[]; from: string }) {
   const { setTradeStop, createGroup, session } = useJournal();
 
-  const [open, setOpen] = useState<Set<number>>(new Set());
+  /** Expanded rows, keyed `g<group id>` or `p<first lot id>` so the two id spaces never collide. */
+  const [open, setOpen] = useState<Set<string>>(new Set());
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [saving, setSaving] = useState(false);
 
@@ -48,7 +56,16 @@ export default function TradesTable({ rows, from }: { rows: TableRow[]; from: st
    * and it comes back if the filter is undone.
    */
   const selected = useMemo(
-    () => rows.flatMap((r) => (r.kind === "lot" && picked.has(r.trade.id) ? [r.trade] : [])),
+    () =>
+      rows.flatMap((r) =>
+        r.kind === "lot"
+          ? picked.has(r.trade.id)
+            ? [r.trade]
+            : []
+          : r.kind === "position"
+            ? r.summary.lots.filter((l) => picked.has(l.id))
+            : []
+      ),
     [rows, picked]
   );
 
@@ -65,7 +82,19 @@ export default function TradesTable({ rows, from }: { rows: TableRow[]; from: st
       return next;
     });
 
-  const toggleOpen = (id: number) =>
+  /** A position is picked whole: its lots were one decision, so they join a basket together. */
+  const togglePosition = (ids: number[]) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      const all = ids.every((id) => next.has(id));
+      for (const id of ids) {
+        if (all) next.delete(id);
+        else next.add(id);
+      }
+      return next;
+    });
+
+  const toggleOpen = (id: string) =>
     setOpen((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -164,22 +193,25 @@ export default function TradesTable({ rows, from }: { rows: TableRow[]; from: st
           <span>Stop</span>
           <span className="text-right">Risk</span>
           <span className="text-right">R:R</span>
+          <span className="text-right" title="Brokerage, exchange charges, STT, stamp duty, SEBI fees and GST">
+            Charges
+          </span>
           <span className="text-right">P&L</span>
         </div>
 
         {rows.map((row) =>
           row.kind === "group" ? (
-            <div key={`g${row.group.id}`}>
+            <div key={`g${row.group.id}`} className={WRAP}>
               {/* Basket: one trade, whatever it took to put it on */}
               <div className={`${ROW} ${COLS} text-[12.5px] text-muted bg-[rgba(145,132,217,0.05)]`}>
                 <button
                   type="button"
-                  aria-expanded={open.has(row.group.id)}
-                  aria-label={open.has(row.group.id) ? "Collapse legs" : "Expand legs"}
-                  onClick={() => toggleOpen(row.group.id)}
+                  aria-expanded={open.has(`g${row.group.id}`)}
+                  aria-label={open.has(`g${row.group.id}`) ? "Collapse legs" : "Expand legs"}
+                  onClick={() => toggleOpen(`g${row.group.id}`)}
                   className="border-0 bg-transparent p-0 text-[13px] text-dim cursor-pointer transition-colors hover:text-accent-deep"
                 >
-                  <i className={`ph ph-caret-${open.has(row.group.id) ? "down" : "right"}`} />
+                  <i className={`ph ph-caret-${open.has(`g${row.group.id}`) ? "down" : "right"}`} />
                 </button>
                 <span>{shortDay(row.summary.tradeDate)}</span>
                 <span className="flex flex-col gap-[1px] min-w-0">
@@ -217,16 +249,33 @@ export default function TradesTable({ rows, from }: { rows: TableRow[]; from: st
                   {row.summary.r === null ? DASH : rLabel(row.summary.r)}
                 </span>
                 <span
-                  className="text-right text-[13.5px] font-medium"
-                  style={{ color: row.summary.net === null ? undefined : row.summary.net >= 0 ? WIN : LOSS }}
+                  className="text-right"
+                  title={row.summary.charges === null ? "Not known for every leg" : "Summed from the legs"}
                 >
-                  {row.summary.net === null ? <span className="text-dim">open</span> : money(row.summary.net)}
+                  {row.summary.charges === null ? DASH : plain(row.summary.charges)}
                 </span>
+                <PnlCell
+                  gross={row.summary.net}
+                  net={row.summary.netAfterCharges}
+                  className="text-[13.5px] font-medium"
+                />
               </div>
 
-              {open.has(row.group.id) &&
+              {open.has(`g${row.group.id}`) &&
                 row.summary.legs.map((t) => <LegRow key={t.id} t={t} from={from} />)}
             </div>
+          ) : row.kind === "position" ? (
+            <PositionRow
+              key={`p${row.summary.lots[0].id}`}
+              p={row.summary}
+              from={from}
+              expanded={open.has(`p${row.summary.lots[0].id}`)}
+              onExpand={() => toggleOpen(`p${row.summary.lots[0].id}`)}
+              picked={row.summary.lots.every((l) => picked.has(l.id))}
+              canPick={Boolean(session)}
+              onPick={() => togglePosition(row.summary.lots.map((l) => l.id))}
+              onStop={(v) => row.summary.lots.forEach((l) => setTradeStop(l.id, v))}
+            />
           ) : (
             <LotRow
               key={row.trade.id}
@@ -244,7 +293,98 @@ export default function TradesTable({ rows, from }: { rows: TableRow[]; from: st
   );
 }
 
-/** A leg inside a basket: the same facts, indented and dimmed, still its own trade to open. */
+/**
+ * One position the broker filled in several lots — scaled in, partially filled, or exited in
+ * parts. Prices are size-weighted averages; the stop typed here is written to every lot, since
+ * Postgres derives each lot's risk from its own stop. Expanding shows the lots as stored.
+ */
+function PositionRow({
+  p,
+  from,
+  expanded,
+  onExpand,
+  picked,
+  canPick,
+  onPick,
+  onStop,
+}: {
+  p: PositionSummary;
+  from: string;
+  expanded: boolean;
+  onExpand: () => void;
+  picked: boolean;
+  canPick: boolean;
+  onPick: () => void;
+  onStop: (v: number | null) => void;
+}) {
+  const first = p.lots[0];
+  return (
+    <div className={WRAP}>
+      <div className={`${ROW} ${COLS} text-[12.5px] text-muted`}>
+        <input
+          type="checkbox"
+          checked={picked}
+          disabled={!canPick}
+          onChange={onPick}
+          aria-label={`Select ${p.instrument} for grouping`}
+          className="w-[13px] h-[13px] accent-accent-deep cursor-pointer disabled:cursor-default"
+        />
+        <span>{shortDay(p.tradeDate)}</span>
+        <span className="flex flex-col gap-[1px] min-w-0">
+          <Link
+            to={`/trades/${first.id}`}
+            state={{ from }}
+            className="text-ink font-medium text-[13px] truncate no-underline hover:text-accent-deep transition-colors"
+          >
+            {p.instrument}
+          </Link>
+          <button
+            type="button"
+            aria-expanded={expanded}
+            onClick={onExpand}
+            className="self-start border-0 bg-transparent p-0 text-[11px] text-dim cursor-pointer transition-colors hover:text-accent-deep"
+          >
+            <i className={`ph ph-caret-${expanded ? "down" : "right"}`} /> {p.lots.length} lots ·{" "}
+            {p.exchange} · {p.direction}
+          </button>
+        </span>
+        <span className="text-dim truncate" title={effectiveType(first)}>
+          {shortType(effectiveType(first))}
+        </span>
+        <span>{p.quantity}</span>
+        <span>{p.lot ?? DASH}</span>
+        <span title="Size-weighted average">{price(p.entryPrice)}</span>
+        <span title="Size-weighted average">{p.exitPrice === null ? DASH : price(p.exitPrice)}</span>
+        <span>{p.entryTime || DASH}</span>
+        <span>{p.exitTime || DASH}</span>
+
+        <input
+          type="number"
+          step="0.05"
+          inputMode="decimal"
+          value={p.stop ?? ""}
+          placeholder={p.mixedStop ? "mixed" : DASH}
+          title="Applies to every lot in this position"
+          onChange={(e) => onStop(e.target.value === "" ? null : Number(e.target.value))}
+          className="w-full px-2 py-[3px] text-[12px] text-right rounded-sm border border-line-strong bg-transparent text-ink-2 focus:border-accent"
+        />
+
+        <span className="text-right">{p.risk === null ? DASH : plain(p.risk)}</span>
+        <span className="text-right" style={{ color: p.r === null ? undefined : p.r >= 0 ? WIN : LOSS }}>
+          {p.r === null ? DASH : rLabel(p.r)}
+        </span>
+        <span className="text-right" title={p.charges === null ? "Not known for every lot" : "Summed from the lots"}>
+          {p.charges === null ? DASH : plain(p.charges)}
+        </span>
+        <PnlCell gross={p.net} net={p.netAfterCharges} className="text-[13.5px] font-medium" />
+      </div>
+
+      {expanded && p.lots.map((t) => <LegRow key={t.id} t={t} from={from} />)}
+    </div>
+  );
+}
+
+/** A leg inside a basket or a position: the same facts, indented and dimmed, still openable. */
 function LegRow({ t, from }: { t: DbTrade; from: string }) {
   return (
     <div className={`${ROW} ${COLS} text-[12px] text-dim bg-bg`}>
@@ -274,12 +414,8 @@ function LegRow({ t, from }: { t: DbTrade; from: string }) {
       <span>{t.stopPrice === null ? DASH : price(t.stopPrice)}</span>
       <span className="text-right">{t.initialRisk === null ? DASH : plain(t.initialRisk)}</span>
       <span className="text-right">{t.rr === null ? DASH : rLabel(t.rr)}</span>
-      <span
-        className="text-right text-[12.5px]"
-        style={{ color: t.pnl === null ? undefined : t.pnl >= 0 ? WIN : LOSS }}
-      >
-        {t.pnl === null ? "open" : money(t.pnl)}
-      </span>
+      <ChargesCell t={t} />
+      <PnlCell gross={t.pnl} net={t.netPnl} className="text-[12.5px]" />
     </div>
   );
 }
@@ -300,7 +436,6 @@ function LotRow({
   onPick: () => void;
   onStop: (v: number | null) => void;
 }) {
-  const pnlColor = (t.pnl ?? 0) >= 0 ? WIN : LOSS;
   const rColor = (t.rr ?? 0) >= 0 ? WIN : LOSS;
 
   return (
@@ -351,12 +486,44 @@ function LotRow({
       <span className="text-right" style={{ color: t.rr === null ? undefined : rColor }}>
         {t.rr === null ? DASH : rLabel(t.rr)}
       </span>
-      <span
-        className="text-right text-[13.5px] font-medium"
-        style={{ color: t.pnl === null ? undefined : pnlColor }}
-      >
-        {t.pnl === null ? <span className="text-dim">open</span> : money(t.pnl)}
-      </span>
+      <ChargesCell t={t} />
+      <PnlCell gross={t.pnl} net={t.netPnl} className="text-[13.5px] font-medium" />
     </div>
+  );
+}
+
+/** A lot's charges, with the brokerage / everything-else split on hover. */
+function ChargesCell({ t }: { t: DbTrade }) {
+  const c = chargesOf(t);
+  return (
+    <span
+      className="text-right"
+      title={
+        c === null
+          ? "Not synced with charges"
+          : `Brokerage ${plain(t.brokerage ?? 0)} · taxes & fees ${plain(t.txnCharges ?? 0)}`
+      }
+    >
+      {c === null ? DASH : plain(c)}
+    </span>
+  );
+}
+
+/** Gross P&L, and the net after charges beneath it once the charges are known. */
+function PnlCell({ gross, net, className }: { gross: number | null; net: number | null; className: string }) {
+  if (gross === null) {
+    return <span className={`text-right text-dim ${className}`}>open</span>;
+  }
+  return (
+    <span className="text-right flex flex-col gap-[1px]">
+      <span className={className} style={{ color: gross >= 0 ? WIN : LOSS }}>
+        {money(gross)}
+      </span>
+      {net !== null && (
+        <span className="text-[11px]" style={{ color: net >= 0 ? WIN : LOSS }}>
+          net {money(net)}
+        </span>
+      )}
+    </span>
   );
 }

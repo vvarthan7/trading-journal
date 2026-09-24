@@ -169,18 +169,26 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     if (!isBrokerConfigured()) return;
     setSyncing(true);
     try {
-      const lots = toLots(await fetchTradeBook());
-      if (lots.length > 0) {
+      const book = await fetchTradeBook();
+      const lots = toLots(book.fills, book.charges);
+      // An upsert nulls every column one of its rows leaves out, so lots whose charges are
+      // unknown go in their own batch — otherwise they would blank charges stored earlier.
+      const priced = lots.filter((l) => l.brokerage !== null);
+      const unpriced = lots.filter((l) => l.brokerage === null);
+      for (const batch of [priced, unpriced]) {
+        if (batch.length === 0) continue;
         // Keyed on (user_id, entry_fill_id, lot_seq), so re-running a sync updates the rows it
         // wrote before rather than duplicating them — and leaves stop_price untouched.
         const { data, error } = await supabase
           .from("trades")
-          .upsert(lots.map(toInsert), { onConflict: "user_id,entry_fill_id,lot_seq" })
+          .upsert(batch.map(toInsert), { onConflict: "user_id,entry_fill_id,lot_seq" })
           .select("id");
         if (error) throw new Error(error.message);
         if (!data.length) throw new Error(NOT_SAVED);
       }
       await loadTrades();
+      // The trades are saved; only their costs are missing, so say so without failing the sync.
+      if (book.chargesError) setTradesError(`${book.chargesError} — trades synced without charges.`);
     } catch (e) {
       setTradesError(e instanceof Error ? e.message : String(e));
     } finally {

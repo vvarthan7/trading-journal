@@ -10,9 +10,12 @@
  * `lotSeq` counts the rows produced from a single entry fill, in emission order. That order is
  * deterministic — fills are walked oldest first and matched FIFO — so the same lot keeps the
  * same key on every sync, which is what lets a re-sync update rows instead of duplicating them.
+ *
+ * Charges are levied per order, so each order's are split across the lots it touched, pro rata
+ * by quantity. A lot carries its share of its entry order plus, once closed, its exit order.
  */
 import type { Direction } from "../types";
-import type { SmartApiFill } from "./smartapi";
+import type { OrderCharges, SmartApiFill } from "./smartapi";
 import { kindOf, seconds } from "./brokerTrades";
 import { todayIso } from "./format";
 
@@ -47,6 +50,11 @@ export interface TradeLot {
   strike: number | null;
   optionType: string;
   lotSize: number | null;
+
+  /** This lot's share of its orders' charges. Null when any order it touched was not priced. */
+  brokerage: number | null;
+  /** Exchange charges, STT, stamp duty, SEBI fees and GST — everything but brokerage. */
+  txnCharges: number | null;
 }
 
 const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
@@ -90,7 +98,29 @@ interface OpenLot {
   direction: Direction;
 }
 
-export function toLots(fills: SmartApiFill[]): TradeLot[] {
+/** Paise, so a split never stores a fraction of one. */
+function paise(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+export function toLots(
+  fills: SmartApiFill[],
+  charges: Record<string, OrderCharges> | null = null
+): TradeLot[] {
+  /** Each order's filled quantity — the denominator its charges are split over. */
+  const orderQty = new Map<string, number>();
+  for (const f of fills) {
+    orderQty.set(f.orderid, (orderQty.get(f.orderid) ?? 0) + (Number(f.fillsize) || 0));
+  }
+
+  /** `quantity`'s share of one order's charges, or null if the order was not priced. */
+  const shareOf = (orderId: string, quantity: number): OrderCharges | null => {
+    const c = charges?.[orderId];
+    const total = orderQty.get(orderId) ?? 0;
+    if (!c || total <= 0) return null;
+    return { brokerage: (c.brokerage * quantity) / total, total: (c.total * quantity) / total };
+  };
+
   const groups = new Map<string, SmartApiFill[]>();
   for (const f of fills) {
     const key = `${f.exchange}|${f.tradingsymbol}|${f.producttype}`;
@@ -115,6 +145,13 @@ export function toLots(fills: SmartApiFill[]): TradeLot[] {
       nextSeq.set(entry.fill.fillid, seq + 1);
 
       const lotSize = Number(entry.fill.marketlot) || 0;
+
+      const entryShare = shareOf(entry.fill.orderid, quantity);
+      const exitShare = exit ? shareOf(exit.orderid, quantity) : null;
+      const priced = entryShare !== null && (exit === null || exitShare !== null);
+      const brokerage = (entryShare?.brokerage ?? 0) + (exitShare?.brokerage ?? 0);
+      const total = (entryShare?.total ?? 0) + (exitShare?.total ?? 0);
+
       lots.push({
         entryFillId: entry.fill.fillid,
         entryOrderId: entry.fill.orderid,
@@ -137,6 +174,9 @@ export function toLots(fills: SmartApiFill[]): TradeLot[] {
         exitTime: exit?.filltime ?? null,
 
         ...optionIdentity(entry.fill),
+
+        brokerage: priced ? paise(brokerage) : null,
+        txnCharges: priced ? paise(total - brokerage) : null,
       });
     };
 

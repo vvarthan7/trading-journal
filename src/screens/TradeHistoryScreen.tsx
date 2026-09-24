@@ -8,8 +8,8 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useJournal } from "../store";
-import { money } from "../lib/format";
-import { buildRows, statsOf } from "../lib/tradeGroups";
+import { money, plain } from "../lib/format";
+import { buildRows, rowDate, rowOpen, rowPnl, statsOf } from "../lib/tradeGroups";
 import TradesTable from "../components/TradesTable";
 import BasketSuggestions from "../components/BasketSuggestions";
 import { PillGroup, WIN, LOSS } from "../components/ui";
@@ -53,13 +53,13 @@ export default function TradeHistoryScreen() {
     return [...seen].sort().reverse();
   }, [dbTrades]);
 
-  /** Baskets fold their legs in before anything is filtered, so a basket filters as one trade. */
+  /** Baskets and positions fold their lots in before anything is filtered, so each filters as one trade. */
   const all = useMemo(() => buildRows(dbTrades, tradeGroups), [dbTrades, tradeGroups]);
 
   const rows = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return all.filter((row) => {
-      const date = row.kind === "lot" ? row.trade.tradeDate : row.summary.tradeDate;
+      const date = rowDate(row);
       if (month !== ALL_MONTHS && monthOf(date) !== month) return false;
 
       if (needle) {
@@ -67,12 +67,14 @@ export default function TradeHistoryScreen() {
         const hay =
           row.kind === "lot"
             ? row.trade.instrument
-            : [row.group.name, ...row.summary.legs.map((l) => l.instrument)].join(" ");
+            : row.kind === "position"
+              ? row.summary.instrument
+              : [row.group.name, ...row.summary.legs.map((l) => l.instrument)].join(" ");
         if (!hay.toLowerCase().includes(needle)) return false;
       }
 
-      const pnl = row.kind === "lot" ? row.trade.pnl : row.summary.net;
-      const isOpen = row.kind === "lot" ? row.trade.open : row.summary.open;
+      const pnl = rowPnl(row);
+      const isOpen = rowOpen(row);
       if (filter === "winners") return (pnl ?? 0) > 0;
       if (filter === "losers") return (pnl ?? 0) < 0;
       if (filter === "open") return isOpen;
@@ -81,7 +83,7 @@ export default function TradeHistoryScreen() {
   }, [all, filter, month, query]);
 
   /** Totals for what is on screen, not for the whole table. A basket counts once. */
-  const { net, closed, winRate } = statsOf(rows);
+  const { net, charges, netAfterCharges, uncharged, closed, winRate } = statsOf(rows);
   const total = statsOf(all);
 
   const status = tradesLoading
@@ -118,9 +120,26 @@ export default function TradeHistoryScreen() {
         <span className={tradesError ? "text-loss" : "text-muted"}>{status}</span>
         <div className="flex items-center gap-6">
           <span className="text-dim">
-            Net{" "}
+            Gross{" "}
             <span className="font-medium" style={{ color: net >= 0 ? WIN : LOSS }}>
               {money(net)}
+            </span>
+          </span>
+          <span
+            className="text-dim"
+            title={
+              uncharged > 0
+                ? `${uncharged} closed ${uncharged === 1 ? "trade has" : "trades have"} no charges stored, so net is overstated`
+                : "Brokerage, exchange charges, STT, stamp duty, SEBI fees and GST"
+            }
+          >
+            Charges <span className="text-ink-2">{plain(charges)}</span>
+            {uncharged > 0 && <span className="text-warn"> · {uncharged} missing</span>}
+          </span>
+          <span className="text-dim">
+            Net{" "}
+            <span className="font-medium" style={{ color: netAfterCharges >= 0 ? WIN : LOSS }}>
+              {money(netAfterCharges)}
             </span>
           </span>
           <span className="text-dim">
