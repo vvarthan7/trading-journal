@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import type { JournalEntry, PlanAdherence, QueuedFill, Trade } from "./types";
-import { missingFields, nextLevel, nowLocalInput, todayIso } from "./lib/format";
+import { JOURNAL_INSTRUMENT, missingFields, nextLevel, nowLocalInput, todayIso } from "./lib/format";
 import { supabase } from "./lib/supabase";
 import { fromRow, toRow } from "./lib/journalRows";
 import type { JournalRow } from "./lib/journalRows";
@@ -416,7 +416,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     if (level === null) return;
     const { data, error } = await supabase
       .from("journal_entries")
-      .insert({ date_time: nowLocalInput(), level })
+      .insert({ date_time: nowLocalInput(), level, instrument: JOURNAL_INSTRUMENT })
       .select()
       .single();
     if (error) {

@@ -16,12 +16,18 @@ const NAV = [
     hasBadge: false,
   },
   // { to: "/session", label: "Session", icon: "ph ph-crosshair", hasBadge: true },
-  // {
-  //   to: "/trades",
-  //   label: "Trades",
-  //   icon: "ph ph-list-dashes",
-  //   hasBadge: false,
-  // },
+  {
+    to: "/trades",
+    label: "Trades",
+    icon: "ph ph-list-dashes",
+    hasBadge: false,
+  },
+  {
+    to: "/history",
+    label: "History",
+    icon: "ph ph-clock-counter-clockwise",
+    hasBadge: false,
+  },
   // {
   //   to: "/playbook",
   //   label: "Playbook",

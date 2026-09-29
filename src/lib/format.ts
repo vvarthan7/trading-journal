@@ -73,6 +73,9 @@ export const LEVELS = 6;
 export const TRADES_PER_LEVEL = 10;
 export const WINS_TO_ADVANCE = 6;
 
+/** The journal and level play are NIFTY only; trades in anything else are strategy tests. */
+export const JOURNAL_INSTRUMENT = "NIFTY";
+
 /** Entries on `level`, not counting the entry `exceptId`. */
 export function levelCount(entries: JournalEntry[], level: number, exceptId?: number): number {
   return entries.filter((e) => e.level === level && e.id !== exceptId).length;

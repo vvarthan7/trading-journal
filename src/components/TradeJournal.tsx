@@ -1,6 +1,7 @@
 import { useJournal } from "../store";
 import type { JournalEntry, YesNo } from "../types";
 import {
+  JOURNAL_INSTRUMENT,
   LEVELS,
   WINS_TO_ADVANCE,
   canUseLevel,
@@ -249,14 +250,10 @@ export default function TradeJournal() {
               <input
                 type="text"
                 aria-label="Instrument"
-                aria-invalid={missing[i].has("instrument") || undefined}
-                required
-                placeholder="NIFTY"
-                value={e.instrument}
-                onChange={(ev) =>
-                  set(e.id, { instrument: ev.target.value.toUpperCase() })
-                }
-                className={`${field(missing[i].has("instrument"))} placeholder:text-dim/60`}
+                title="The journal is NIFTY only — other instruments are strategy tests"
+                readOnly
+                value={JOURNAL_INSTRUMENT}
+                className={`${field(false)} text-dim`}
               />
 
               <Choice

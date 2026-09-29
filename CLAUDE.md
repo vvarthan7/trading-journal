@@ -54,7 +54,7 @@ trip, not the raw fill. Change it with that in mind; phase 2 builds tables from 
 page). `/trades` and `/history` are the same table over the same `trades` rows — `TradesScreen`
 is scoped to `todayTrades` and owns the broker sync, `TradeHistoryScreen` shows every stored lot
 and only ever reads Supabase (SmartAPI has no historical trade book, so history cannot come from
-the broker). Neither is in the sidebar today; they link to each other, and each row's instrument
+the broker). Both are in the sidebar (Trades, History) and link to each other; each row's instrument
 links to `/trades/:id`, passing `state.from` so Back returns to the table it came from.
 
 **`TradeDetailScreen` runs on `dbTrades`**, so `:id` is a `public.trades` primary key.
@@ -110,6 +110,14 @@ same date, exchange, instrument and direction whose holding periods overlap (fla
 into a `position` row: weighted-average prices, summed P&L, and a stop that writes to every lot.
 Nothing is stored for it — the lots stay exactly as synced — and it counts once in `statsOf`.
 A lot that is its whole position still renders as a plain `lot` row.
+
+**Level play reads broker P&L, but nothing links a journal entry to a trade.** From level 2 up,
+`journalPnl` in `src/lib/levelPnl.ts` matches each entry to a closed NIFTY `buildRows` row on the
+same day (the journal is NIFTY only — `JOURNAL_INSTRUMENT` in `format.ts`, fixed on insert and
+read-only in the table; trades in anything else are strategy tests and never count), entered
+within 15 minutes of the journal time, closest first, each row used once. Unmatched entries are
+left out of the profit/loss sums, not counted as zero. `trades` is not publicly readable, so
+signed-out viewers see "—" there.
 
 **Most trades are not baskets.** A lot with `group_id` NULL renders through the table's existing
 row markup untouched. Grouping is opt-in: `suggestBaskets` only ever proposes (and only for
