@@ -35,6 +35,9 @@ export interface EquitySeries {
   totalPnl: number;
   /** Lots whose charges were unknown, so their gross P&L was used. */
   grossOnly: number;
+  /** The highest the account has been, and the point it was reached at (0 = the start). */
+  high: number;
+  highAt: number;
   /** The deepest drawdown, in rupees (≤ 0), and the point it happened at. */
   maxDrawdown: number;
   maxDrawdownPct: number | null;
@@ -80,10 +83,14 @@ export function equitySeries(trades: DbTrade[], accountValue: number | null): Eq
   let maxDrawdown = 0;
   let maxDrawdownPct: number | null = null;
   let maxDrawdownAt = 0;
+  let highAt = 0;
   lots.forEach((t, i) => {
     const pnl = pnlOf(t);
     equity += pnl;
-    peak = Math.max(peak, equity);
+    if (equity > peak) {
+      peak = equity;
+      highAt = i + 1;
+    }
     const drawdown = equity - peak;
     const drawdownPct = peak > 0 ? (drawdown / peak) * 100 : null;
     if (drawdown < maxDrawdown) {
@@ -109,6 +116,8 @@ export function equitySeries(trades: DbTrade[], accountValue: number | null): Eq
     start,
     anchored,
     totalPnl,
+    high: peak,
+    highAt,
     grossOnly: lots.filter((t) => t.netPnl === null).length,
     maxDrawdown,
     maxDrawdownPct: maxDrawdown < 0 ? maxDrawdownPct : start > 0 ? 0 : null,

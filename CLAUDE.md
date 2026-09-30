@@ -115,7 +115,8 @@ A lot that is its whole position still renders as a plain `lot` row.
 RMS limits; the store fetches it on sign-in and after each sync (`funds`, `reloadFunds`).
 `equitySeries` in `src/lib/equity.ts` sets the starting balance to `net` minus every closed lot's
 P&L (`net_pnl`, falling back to gross `pnl` when charges are unknown) and walks forward in exit
-order, so the last point is always today's account value. There is no balance history at the
+order, so the last point is always today's account value. The running peak is the highest account
+value (`high`, `highAt`), shown as a tile and a marker on the curve. There is no balance history at the
 broker, so deposits and withdrawals are not separated — they land in the reconstructed start.
 Without an account value the curve is plain cumulative P&L from 0. `EquityCurve` on the dashboard
 draws equity and drawdown on a shared x axis with one crosshair.

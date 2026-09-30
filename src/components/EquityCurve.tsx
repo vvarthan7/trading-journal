@@ -65,6 +65,15 @@ export default function EquityCurve() {
       color: s.totalPnl >= 0 ? WIN : LOSS,
     },
     {
+      label: "Highest value",
+      value: whole(s.high),
+      sub:
+        s.highAt === 0
+          ? n > 1 ? "starting balance" : "no closed trades"
+          : `${shortDay(s.points[s.highAt].tradeDate)} · ${s.points[s.highAt].exitTime}${last && last.drawdown < 0 ? "" : " · now"}`,
+      color: "var(--color-ink)",
+    },
+    {
       label: "Max drawdown",
       value: whole(s.maxDrawdown),
       sub: s.maxDrawdown < 0 ? `${pct(s.maxDrawdownPct)} · ${shortDay(s.points[s.maxDrawdownAt].tradeDate)}` : "none yet",
@@ -100,7 +109,7 @@ export default function EquityCurve() {
         </button>
       </div>
 
-      <section className="grid grid-cols-4 gap-px bg-line border-b border-line">
+      <section className="grid grid-cols-5 gap-px bg-line border-b border-line">
         {tiles.map((t) => (
           <div key={t.label + t.sub} className="bg-surface px-6 py-5 flex flex-col gap-2">
             <Eyebrow>{t.label}</Eyebrow>
@@ -143,6 +152,9 @@ export default function EquityCurve() {
                   <path d={ddArea} fill={LOSS} fillOpacity="0.14" />
                   <path d={dd.d} fill="none" stroke={LOSS} strokeWidth="1.5" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
                 </Chart>
+
+                {/* The highest the account has been, marked where it was reached. */}
+                <Dot left={xPct(s.highAt)} top={eq.points[s.highAt][1]} color="#5d5294" />
 
                 {at && hover !== null && (
                   <Crosshair
