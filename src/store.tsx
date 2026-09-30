@@ -6,7 +6,8 @@ import { JOURNAL_INSTRUMENT, missingFields, nextLevel, nowLocalInput, todayIso }
 import { supabase } from "./lib/supabase";
 import { fromRow, toRow } from "./lib/journalRows";
 import type { JournalRow } from "./lib/journalRows";
-import { brokerConfigured as isBrokerConfigured, fetchTradeBook } from "./lib/smartapi";
+import { brokerConfigured as isBrokerConfigured, fetchFunds, fetchTradeBook } from "./lib/smartapi";
+import type { Funds } from "./lib/smartapi";
 import { toLots } from "./lib/tradeLots";
 import { fromRow as tradeFromRow, toInsert } from "./lib/tradeRows";
 import type { DbTrade, TradeRow } from "./lib/tradeRows";
@@ -71,6 +72,12 @@ interface JournalState {
   deleteGroup: (id: number) => Promise<void>;
   /** Move one leg into a basket, or out of the one it is in. */
   setTradeGroup: (tradeId: number, groupId: number | null) => void;
+  /** The account's value from the broker's RMS limits. Null until loaded, or when signed out. */
+  funds: Funds | null;
+  fundsError: string | null;
+  /** Ask the broker for the account value again. */
+  reloadFunds: () => Promise<void>;
+
   /** The level's risk per trade — a placeholder for the basket risk box, never stored. */
   expectedRiskPerTrade: number | null;
 
@@ -120,6 +127,8 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   const [tradesLoading, setTradesLoading] = useState(true);
   const [tradesError, setTradesError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [funds, setFunds] = useState<Funds | null>(null);
+  const [fundsError, setFundsError] = useState<string | null>(null);
   const [queue, setQueue] = useState<QueuedFill[]>(QUEUE);
   const [captureMode, setCaptureMode] = useState<CaptureMode>("review");
   const [sessionFocus, setSessionFocus] = useState<number>(TODAY.focus);
@@ -165,6 +174,23 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     void loadGroups();
   }, [loadTrades, loadGroups]);
 
+  const loadFunds = useCallback(async () => {
+    if (!isBrokerConfigured()) return;
+    try {
+      setFunds(await fetchFunds());
+      setFundsError(null);
+    } catch (e) {
+      setFundsError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  // The proxy needs a session, so the account value is fetched on sign-in and dropped on sign-out.
+  const signedIn = session !== null;
+  useEffect(() => {
+    if (signedIn) void loadFunds();
+    else setFunds(null);
+  }, [signedIn, loadFunds]);
+
   const syncBrokerTrades = useCallback(async () => {
     if (!isBrokerConfigured()) return;
     setSyncing(true);
@@ -187,6 +213,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
         if (!data.length) throw new Error(NOT_SAVED);
       }
       await loadTrades();
+      void loadFunds();
       // The trades are saved; only their costs are missing, so say so without failing the sync.
       if (book.chargesError) setTradesError(`${book.chargesError} — trades synced without charges.`);
     } catch (e) {
@@ -194,7 +221,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     } finally {
       setSyncing(false);
     }
-  }, [loadTrades]);
+  }, [loadTrades, loadFunds]);
 
   const flushTrade = useCallback(
     async (id: number) => {
@@ -515,6 +542,9 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       updateGroup,
       deleteGroup,
       setTradeGroup,
+      funds,
+      fundsError,
+      reloadFunds: loadFunds,
       expectedRiskPerTrade,
 
       journal,
@@ -570,6 +600,9 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       updateGroup,
       deleteGroup,
       setTradeGroup,
+      funds,
+      fundsError,
+      loadFunds,
       expectedRiskPerTrade,
       journal,
       journalLoading,

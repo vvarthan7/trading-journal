@@ -49,8 +49,9 @@ curl http://127.0.0.1:8000/api/health
 | --- | --- |
 | `GET /api/health` | Readiness and which origins are allowed. No auth. |
 | `GET /api/trades` | Today's SmartAPI fills, plus `charges` — brokerage and total charges per order ID from SmartAPI's charges estimator (`null`, with `charges_error` set, if that call fails). Requires `Authorization: Bearer <supabase access token>`. |
+| `GET /api/funds` | The account's value from SmartAPI's RMS limits: `net`, `available_cash`, `utilised`, `m2m_realised`, `m2m_unrealised`. Same auth as `/api/trades`. |
 
-`/api/trades` verifies the token by asking Supabase who it belongs to, so a stranger who finds
+Both broker routes verify the token by asking Supabase who it belongs to, so a stranger who finds
 the URL cannot read your trade book. Set `ALLOWED_USER_ID` to lock it to one account.
 
 Lot matching is deliberately **not** done here — it lives in `src/lib/tradeLots.ts`, where it is

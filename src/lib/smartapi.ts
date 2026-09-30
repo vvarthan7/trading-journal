@@ -100,3 +100,42 @@ export async function fetchTradeBook(): Promise<TradeBook> {
     chargesError: typeof body.charges_error === "string" ? body.charges_error : null,
   };
 }
+
+/** The account's value from SmartAPI's RMS limits. Any figure can be null if the broker omits it. */
+export interface Funds {
+  /** What the account is worth right now. */
+  net: number | null;
+  availableCash: number | null;
+  utilised: number | null;
+  m2mRealised: number | null;
+  m2mUnrealised: number | null;
+}
+
+/** Account value, straight from the broker. Needs a signed-in session, like the trade book. */
+export async function fetchFunds(): Promise<Funds> {
+  if (!API_BASE) throw new Error("No backend URL — set VITE_API_BASE to your deployed FastAPI service.");
+
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) throw new Error("Sign in first — the broker proxy requires your session.");
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/funds`, { headers: { Authorization: `Bearer ${token}` } });
+  } catch {
+    throw new Error("Could not reach the broker proxy — is it running?");
+  }
+
+  const body = await readJson(res);
+  if (!res.ok) {
+    throw new Error(typeof body.detail === "string" ? body.detail : `Proxy error ${res.status}`);
+  }
+  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  return {
+    net: n(body.net),
+    availableCash: n(body.available_cash),
+    utilised: n(body.utilised),
+    m2mRealised: n(body.m2m_realised),
+    m2mUnrealised: n(body.m2m_unrealised),
+  };
+}

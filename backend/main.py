@@ -38,6 +38,7 @@ LOGIN_PATH = "/rest/auth/angelbroking/user/v1/loginByPassword"
 TRADE_BOOK_PATH = "/rest/secure/angelbroking/order/v1/getTradeBook"
 ORDER_BOOK_PATH = "/rest/secure/angelbroking/order/v1/getOrderBook"
 CHARGES_PATH = "/rest/secure/angelbroking/brokerage/v1/estimateCharges"
+RMS_PATH = "/rest/secure/angelbroking/user/v1/getRMS"
 
 # Orders per estimateCharges call. SmartAPI does not document a ceiling, so stay modest.
 CHARGES_BATCH = 25
@@ -320,3 +321,40 @@ def trades(authorization: str | None = Header(default=None)) -> dict[str, Any]:
             charges_error = f"Charges unavailable: {exc}"
 
     return {"fills": fills, "charges": charges, "charges_error": charges_error}
+
+
+def _num(v: Any) -> float | None:
+    """SmartAPI sends RMS figures as strings, and null for anything that does not apply."""
+    try:
+        return None if v is None or v == "" else float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+@app.get("/api/funds")
+def funds(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    """
+    The account's value right now, from SmartAPI's RMS limits. `net` is what the account is
+    worth; the frontend anchors the equity curve to it and backs out trade P&L to draw history.
+    """
+    _require_user(authorization)
+
+    if not _broker_ready():
+        raise HTTPException(503, "Broker credentials are not configured on the server")
+
+    try:
+        body = _smartapi("GET", RMS_PATH)
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(502, f"SmartAPI funds failed: {exc}") from exc
+
+    if not body.get("status"):
+        raise HTTPException(502, body.get("message") or "SmartAPI returned an error")
+
+    data: dict[str, Any] = body.get("data") or {}
+    return {
+        "net": _num(data.get("net")),
+        "available_cash": _num(data.get("availablecash")),
+        "utilised": _num(data.get("utiliseddebits")),
+        "m2m_realised": _num(data.get("m2mrealized")),
+        "m2m_unrealised": _num(data.get("m2munrealized")),
+    }

@@ -1,3 +1,4 @@
+import EquityCurve from "../components/EquityCurve";
 import LevelPlay from "../components/LevelPlay";
 import TradeJournal from "../components/TradeJournal";
 
@@ -12,6 +13,7 @@ export default function DashboardScreen() {
         <div className="text-[13px] text-muted">Your progress at a glance</div>
       </header>
 
+      <EquityCurve />
       <LevelPlay />
       <TradeJournal />
     </div>
