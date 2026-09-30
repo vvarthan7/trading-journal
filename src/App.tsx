@@ -12,13 +12,23 @@ import CaptureScreen from "./screens/CaptureScreen";
 import SignInScreen from "./screens/SignInScreen";
 import { useJournal } from "./store";
 
-/** Unlinked sign-in URL. Set VITE_SIGN_IN_PATH in .env.local to keep it private. */
+/** The old unlinked sign-in URL. Kept only so bookmarks to it land on the dashboard. */
 const SIGN_IN_PATH = import.meta.env.VITE_SIGN_IN_PATH || "/signin";
 
+/**
+ * The whole site is private. Signed out, every URL renders the sign-in screen in place, so the
+ * address is kept and signing in lands on the page that was asked for.
+ */
 export default function App() {
+  const { session, authReady } = useJournal();
+  // Reading the stored session is async; render nothing until it resolves so a signed-in
+  // reload never flashes the sign-in screen.
+  if (!authReady) return <div className="min-h-screen bg-bg" />;
+  if (!session) return <SignInScreen />;
+
   return (
     <Routes>
-      <Route path={SIGN_IN_PATH} element={<SignInScreen />} />
+      <Route path={SIGN_IN_PATH} element={<Navigate to="/dashboard" replace />} />
       <Route path="*" element={<Shell />} />
     </Routes>
   );

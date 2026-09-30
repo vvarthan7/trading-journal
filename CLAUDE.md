@@ -23,13 +23,14 @@ runs on mock data.
 
 **Supabase.** The client is `src/lib/supabase.ts`, reading `VITE_SUPABASE_URL` and
 `VITE_SUPABASE_PUBLISHABLE_KEY` from `.env.local`. The schema is managed in the Supabase SQL
-editor — there are no migrations in this repo. RLS on `journal_entries`: anyone may select;
-insert/update/delete require the signed-in owner (`user_id = auth.uid()`, which is also the
-column default). Sign-ups are disabled; the one user signs in on `SignInScreen`, an unlinked
-page at `VITE_SIGN_IN_PATH` (default `/signin`) that sits outside the sidebar shell and
-redirects to `/dashboard`. Nothing links to it — signed-out viewers see no sign-in control
-anywhere, and the journal renders read-only. `AuthPanel` in the sidebar appears only when
-signed in, for sign-out. An RLS-blocked write returns no error, only zero
+editor — there are no migrations in this repo. **The whole site is private.** `App` renders
+`SignInScreen` in place of every route until there is a session (and nothing at all until
+`authReady`, so a reload never flashes it); signing in swaps the app in at the URL that was asked
+for. The store reads nothing until signed in and clears what it loaded on sign-out. Every table is
+owner-only under RLS — `journal_entries` was publicly readable until
+`journal_entries_private.sql`. Sign-ups are disabled; `VITE_SIGN_IN_PATH` (default `/signin`)
+survives only as a redirect to `/dashboard`. `AuthPanel` in the sidebar is for sign-out.
+An RLS-blocked write returns no error, only zero
 rows, so writes chain `.select("id")` and treat an empty result as a failure.
 
 **The store is the intended seam.** `src/store.tsx` exposes `useJournal()`, a context holding
@@ -126,8 +127,7 @@ draws equity and drawdown on a shared x axis with one crosshair.
 same day (the journal is NIFTY only — `JOURNAL_INSTRUMENT` in `format.ts`, fixed on insert and
 read-only in the table; trades in anything else are strategy tests and never count), entered
 within 15 minutes of the journal time, closest first, each row used once. Unmatched entries are
-left out of the profit/loss sums, not counted as zero. `trades` is not publicly readable, so
-signed-out viewers see "—" there.
+left out of the profit/loss sums, not counted as zero.
 
 **Most trades are not baskets.** A lot with `group_id` NULL renders through the table's existing
 row markup untouched. Grouping is opt-in: `suggestBaskets` only ever proposes (and only for
@@ -150,14 +150,14 @@ in a unique index — left alone, the originals would have silently stopped cons
 group-owned rows. `SessionScreen.tsx` still links to `/trades/:id` with a *mock* trade
 id, so those links land on the "not in the journal" fallback; that screen is unlinked from the
 sidebar and still entirely mock. These sit inside
-`Shell`; the sign-in route is matched first, outside it, so it renders without the sidebar. Layout is a fixed 212px sidebar grid
+`Shell`. Layout is a fixed 212px sidebar grid
 plus a `min-w-[1180px]` main column — this is a desktop-only design, not responsive.
 
 **The SQL files are a history, and order matters.** Run them in the SQL editor in the order
 listed at the top of each: `trades.sql` → `trades_lot_seq.sql` → `trade_notes.sql` →
 `trades_idea_strategies.sql` → `trade_screenshots.sql` → `trade_details.sql` →
 `trade_screenshots_table.sql` → `trade_groups.sql` → `trade_details_groups.sql` →
-`trade_charges.sql`.
+`trade_charges.sql` → `journal_entries_private.sql`.
 The later files migrate the earlier shapes forward —
 `trade_details.sql` absorbs `trade_notes` and `trades.idea` then drops both;
 `trade_screenshots_table.sql` adopts images already sitting in the bucket. Every migration block

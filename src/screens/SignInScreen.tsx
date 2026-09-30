@@ -1,21 +1,20 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
 import { useJournal } from "../store";
 
 const INPUT =
   "w-full h-[34px] px-3 rounded-sm border border-line-strong bg-bg text-[13px] text-ink placeholder:text-dim/60 hover:border-accent-line focus-visible:border-accent transition-colors";
 
-/** Unlinked sign-in page, reached only by its URL. Lands on the dashboard once signed in. */
+/**
+ * Shown in place of every page while signed out. Once the session arrives, `App` swaps in the
+ * app at whatever URL was asked for, so there is nothing to navigate to here.
+ */
 export default function SignInScreen() {
-  const { session, signIn } = useJournal();
-  const navigate = useNavigate();
+  const { signIn } = useJournal();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-
-  if (session) return <Navigate to="/dashboard" replace />;
 
   async function submit(ev: FormEvent) {
     ev.preventDefault();
@@ -23,7 +22,6 @@ export default function SignInScreen() {
     const message = await signIn(email.trim(), password);
     setBusy(false);
     setError(message);
-    if (!message) navigate("/dashboard", { replace: true });
   }
 
   return (

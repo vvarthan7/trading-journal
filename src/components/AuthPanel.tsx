@@ -1,9 +1,6 @@
 import { useJournal } from "../store";
 
-/**
- * Sidebar account block, shown only when signed in. Signed-out viewers see nothing here —
- * signing in happens on the unlinked sign-in page (see SIGN_IN_PATH in App.tsx).
- */
+/** Sidebar account block. The sidebar only renders signed in, since the whole site is private. */
 export default function AuthPanel() {
   const { session, signOut } = useJournal();
   if (!session) return null;

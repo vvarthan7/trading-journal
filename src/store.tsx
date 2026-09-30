@@ -38,6 +38,8 @@ const NOT_SAVED = "Not saved — are you still signed in?";
 
 interface JournalState {
   session: Session | null;
+  /** False until the stored session has been read, so the sign-in screen never flashes. */
+  authReady: boolean;
   /** Resolves to an error message, or null on success. */
   signIn: (email: string, password: string) => Promise<string | null>;
   signOut: () => Promise<void>;
@@ -118,6 +120,7 @@ const Ctx = createContext<JournalState | null>(null);
 
 export function JournalProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
+  const [authReady, setAuthReady] = useState(false);
   const [trades, setTrades] = useState<Trade[]>(TRADES);
   const [journal, setJournal] = useState<JournalEntry[]>([]);
   const [journalLoading, setJournalLoading] = useState(true);
@@ -138,7 +141,10 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   const pending = useRef(new Map<number, { patch: Partial<JournalEntry>; timer: number }>());
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setAuthReady(true);
+    });
     const { data } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
     return () => data.subscription.unsubscribe();
   }, []);
@@ -169,10 +175,19 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     else setTradeGroups((data as TradeGroupRow[]).map(groupFromRow));
   }, []);
 
+  // The whole site is behind sign-in: nothing is read until there is a session, and signing out
+  // drops what was loaded so it is not left sitting in memory behind the sign-in screen.
+  const signedIn = session !== null;
   useEffect(() => {
-    void loadTrades();
-    void loadGroups();
-  }, [loadTrades, loadGroups]);
+    if (signedIn) {
+      void loadTrades();
+      void loadGroups();
+    } else {
+      setDbTrades([]);
+      setTradeGroups([]);
+      setTradesLoading(true);
+    }
+  }, [signedIn, loadTrades, loadGroups]);
 
   const loadFunds = useCallback(async () => {
     if (!isBrokerConfigured()) return;
@@ -185,7 +200,6 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // The proxy needs a session, so the account value is fetched on sign-in and dropped on sign-out.
-  const signedIn = session !== null;
   useEffect(() => {
     if (signedIn) void loadFunds();
     else setFunds(null);
@@ -392,8 +406,12 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    void loadJournal();
-  }, [loadJournal]);
+    if (signedIn) void loadJournal();
+    else {
+      setJournal([]);
+      setJournalLoading(true);
+    }
+  }, [signedIn, loadJournal]);
 
   /** Write a row's batched patch now. On failure, show why and reload the truth from the DB. */
   const flush = useCallback(
@@ -519,6 +537,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   const value = useMemo<JournalState>(
     () => ({
       session,
+      authReady,
       signIn,
       signOut,
 
@@ -583,6 +602,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     }),
     [
       session,
+      authReady,
       signIn,
       signOut,
       trades,
