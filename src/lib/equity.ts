@@ -38,6 +38,12 @@ export interface EquitySeries {
   /** The highest the account has been, and the point it was reached at (0 = the start). */
   high: number;
   highAt: number;
+  /**
+   * The bottom of the latest drawdown — the one still running, or the last one recovered from —
+   * and the point it was reached at. With no drawdown ever, the starting balance (point 0).
+   */
+  lastLow: number;
+  lastLowAt: number;
   /** The deepest drawdown, in rupees (≤ 0), and the point it happened at. */
   maxDrawdown: number;
   maxDrawdownPct: number | null;
@@ -111,6 +117,16 @@ export function equitySeries(trades: DbTrade[], accountValue: number | null): Eq
     });
   });
 
+  // Walk back past any new highs at the end, then through the drawdown before them, keeping its
+  // lowest point. Ties go to the latest, which is where the climb back started.
+  let i = points.length - 1;
+  while (i > 0 && points[i].drawdown === 0) i--;
+  let lastLowAt = i;
+  while (i > 0 && points[i].drawdown < 0) {
+    if (points[i].equity < points[lastLowAt].equity) lastLowAt = i;
+    i--;
+  }
+
   return {
     points,
     start,
@@ -118,6 +134,8 @@ export function equitySeries(trades: DbTrade[], accountValue: number | null): Eq
     totalPnl,
     high: peak,
     highAt,
+    lastLow: points[lastLowAt].equity,
+    lastLowAt,
     grossOnly: lots.filter((t) => t.netPnl === null).length,
     maxDrawdown,
     maxDrawdownPct: maxDrawdown < 0 ? maxDrawdownPct : start > 0 ? 0 : null,

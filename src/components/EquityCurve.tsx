@@ -42,6 +42,8 @@ export default function EquityCurve() {
   const eqMax = Math.max(...eqValues);
   const eqMin = Math.min(...eqValues);
   const last = s.points[n - 1];
+  /** How far the account has climbed back off the bottom of its latest drawdown. */
+  const upFromLow = last ? last.equity - s.lastLow : 0;
 
   const onMove = (e: MouseEvent<HTMLDivElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
@@ -84,6 +86,10 @@ export default function EquityCurve() {
       value: whole(last?.drawdown ?? 0),
       sub: last && last.drawdown < 0 ? `${pct(last.drawdownPct)} below peak ${whole(last.peak)}` : "at equity high",
       color: last && last.drawdown < 0 ? LOSS : WIN,
+      up:
+        upFromLow > 0
+          ? `Up ${whole(upFromLow)} from ${s.lastLowAt === 0 ? "start" : `low on ${shortDay(s.points[s.lastLowAt].tradeDate)}`}`
+          : undefined,
     },
   ];
 
@@ -117,6 +123,9 @@ export default function EquityCurve() {
               {t.value}
             </div>
             <div className="text-[12px] text-dim truncate" title={t.sub}>{t.sub}</div>
+            {"up" in t && t.up && (
+              <div className="text-[11.5px] text-win truncate -mt-1" title={t.up}>{t.up}</div>
+            )}
           </div>
         ))}
       </section>
